@@ -5,8 +5,8 @@
 #include <type_traits>
 
 #include <cublas_v2.h>
-#include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include <cuda_runtime.h>
 #include <mma.h>
 
 // Refernece:
@@ -166,8 +166,8 @@ void launch_gemm_cublas(size_t m, size_t n, size_t k, float alpha, T const* A,
     // Not 100% sure. This is TensorCore algorithm?
     constexpr cublasGemmAlgo_t algo{CUBLAS_GEMM_DEFAULT_TENSOR_OP};
     constexpr cudaDataType_t data_type{cuda_data_type<T>()};
-    CHECK_CUBLASS_ERROR(cublasGemmEx(handle, CUBLAS_OP_N, CUBLAS_OP_N, n, m, k,
-                                     &alpha, B, data_type, n, A, data_type, k,
+    CHECK_CUBLASS_ERROR(cublasGemmEx(handle, CUBLAS_OP_N, CUBLAS_OP_N, m, n, k,
+                                     &alpha, A, data_type, k, B, data_type, n,
                                      &beta, C, data_type, n, data_type, algo));
 }
 
@@ -534,8 +534,8 @@ template <typename T, unsigned int BLOCK_TILE_SIZE_X,
           unsigned int BLOCK_TILE_SIZE_Y, unsigned int BLOCK_TILE_SIZE_K,
           unsigned int BLOCK_FRAGMENT_SIZE_Y,
           std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
-__global__ void gemm_v5(size_t m, size_t n, size_t k, float alpha, T const* A, T const* B,
-            float beta, T* C)
+__global__ void gemm_v5(size_t m, size_t n, size_t k, float alpha, T const* A,
+                        T const* B, float beta, T* C)
 {
     __shared__ T A_thread_block_tile[BLOCK_TILE_SIZE_Y][BLOCK_TILE_SIZE_K];
     __shared__ T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X];
@@ -557,8 +557,10 @@ __global__ void gemm_v5(size_t m, size_t n, size_t k, float alpha, T const* A, T
     // BLOCK_TILE_SIZE_X + threadIdx.x % BLOCK_TILE_SIZE_X]
     T C_thread_results[BLOCK_FRAGMENT_SIZE_Y] = {static_cast<T>(0)};
 
-    size_t const B_thread_block_tile_col_idx_cached{threadIdx.x % BLOCK_TILE_SIZE_X};
-    size_t const A_thread_block_tile_col_idx_cached{threadIdx.x / BLOCK_TILE_SIZE_X};
+    size_t const B_thread_block_tile_col_idx_cached{threadIdx.x %
+                                                    BLOCK_TILE_SIZE_X};
+    size_t const A_thread_block_tile_col_idx_cached{threadIdx.x /
+                                                    BLOCK_TILE_SIZE_X};
 
     for (size_t thread_block_tile_idx{0U};
          thread_block_tile_idx < num_thread_block_tiles;
@@ -579,11 +581,14 @@ __global__ void gemm_v5(size_t m, size_t n, size_t k, float alpha, T const* A, T
                                    A_thread_block_tile_col_idx};
 
             // This boundary checking might slow down the kernel to some extent.
-            // That's why some specific data formats are beneficial for CUDA kernels.
-            T const val{(A_row_idx < m && A_col_idx < k) ? A[A_row_idx * k + A_col_idx] : static_cast<T>(0)};
+            // That's why some specific data formats are beneficial for CUDA
+            // kernels.
+            T const val{(A_row_idx < m && A_col_idx < k)
+                            ? A[A_row_idx * k + A_col_idx]
+                            : static_cast<T>(0)};
             A_thread_block_tile[A_thread_block_tile_row_idx]
                                [A_thread_block_tile_col_idx] = val;
-            
+
             // A_thread_block_tile[A_thread_block_tile_row_idx]
             //                    [A_thread_block_tile_col_idx] =
             //                        A[A_row_idx * k + A_col_idx];
@@ -603,8 +608,11 @@ __global__ void gemm_v5(size_t m, size_t n, size_t k, float alpha, T const* A, T
                                    B_thread_block_tile_col_idx};
 
             // This boundary checking might slow down the kernel to some extent.
-            // That's why some specific data formats are beneficial for CUDA kernels.
-            T const val{(B_row_idx < k && B_col_idx < n) ? B[B_row_idx * n + B_col_idx] : static_cast<T>(0)};
+            // That's why some specific data formats are beneficial for CUDA
+            // kernels.
+            T const val{(B_row_idx < k && B_col_idx < n)
+                            ? B[B_row_idx * n + B_col_idx]
+                            : static_cast<T>(0)};
             B_thread_block_tile[B_thread_block_tile_row_idx]
                                [B_thread_block_tile_col_idx] = val;
             // B_thread_block_tile[B_thread_block_tile_row_idx]
@@ -630,8 +638,9 @@ __global__ void gemm_v5(size_t m, size_t n, size_t k, float alpha, T const* A, T
             // size_t const B_thread_block_tile_col_idx{threadIdx.x %
             //                                          BLOCK_TILE_SIZE_X};
             // B_val is cached in the register.
-            T const B_val{B_thread_block_tile[B_thread_block_tile_row_idx]
-                                             [B_thread_block_tile_col_idx_cached]};
+            T const B_val{
+                B_thread_block_tile[B_thread_block_tile_row_idx]
+                                   [B_thread_block_tile_col_idx_cached]};
             for (size_t fragment_y_idx{0U};
                  fragment_y_idx < BLOCK_FRAGMENT_SIZE_Y; ++fragment_y_idx)
             {
@@ -666,7 +675,6 @@ __global__ void gemm_v5(size_t m, size_t n, size_t k, float alpha, T const* A, T
     }
 }
 
-
 // 1D thread tiling
 // Each thread in the block processes BLOCK_FRAGMENT_SIZE_Y output values.
 // Number of threads BLOCK_TILE_SIZE_Y * BLOCK_TILE_SIZE_X /
@@ -675,16 +683,17 @@ template <typename T, unsigned int BLOCK_TILE_SIZE_X,
           unsigned int BLOCK_TILE_SIZE_Y, unsigned int BLOCK_TILE_SIZE_K,
           unsigned int BLOCK_FRAGMENT_SIZE_Y,
           std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
-__global__ void gemm_v5_1(size_t m, size_t n, size_t k, float alpha, T const* A, T const* B,
-            float beta, T* C)
+__global__ void gemm_v5_1(size_t m, size_t n, size_t k, float alpha, T const* A,
+                          T const* B, float beta, T* C)
 {
     __shared__ T A_thread_block_tile[BLOCK_TILE_SIZE_Y][BLOCK_TILE_SIZE_K];
     __shared__ T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X];
 
-    // If using blockDim.x as a variable for num_threads, the performance dropped by 2 TOPS, which is 25% of the total performance!
-    // size_t const num_threads{blockDim.x};
-    constexpr size_t num_threads{
-        BLOCK_TILE_SIZE_X * BLOCK_TILE_SIZE_Y / BLOCK_FRAGMENT_SIZE_Y};
+    // If using blockDim.x as a variable for num_threads, the performance
+    // dropped by 2 TOPS, which is 25% of the total performance! size_t const
+    // num_threads{blockDim.x};
+    constexpr size_t num_threads{BLOCK_TILE_SIZE_X * BLOCK_TILE_SIZE_Y /
+                                 BLOCK_FRAGMENT_SIZE_Y};
 
     // Number of outer loops to perform the sum of inner products.
     // C_thread_block_tile =
@@ -701,8 +710,10 @@ __global__ void gemm_v5_1(size_t m, size_t n, size_t k, float alpha, T const* A,
     // BLOCK_TILE_SIZE_X + threadIdx.x % BLOCK_TILE_SIZE_X]
     T C_thread_results[BLOCK_FRAGMENT_SIZE_Y] = {static_cast<T>(0)};
 
-    size_t const B_thread_block_tile_col_idx_cached{threadIdx.x % BLOCK_TILE_SIZE_X};
-    size_t const A_thread_block_tile_col_idx_cached{threadIdx.x / BLOCK_TILE_SIZE_X};
+    size_t const B_thread_block_tile_col_idx_cached{threadIdx.x %
+                                                    BLOCK_TILE_SIZE_X};
+    size_t const A_thread_block_tile_col_idx_cached{threadIdx.x /
+                                                    BLOCK_TILE_SIZE_X};
 
     for (size_t thread_block_tile_idx{0U};
          thread_block_tile_idx < num_thread_block_tiles;
@@ -723,11 +734,14 @@ __global__ void gemm_v5_1(size_t m, size_t n, size_t k, float alpha, T const* A,
                                    A_thread_block_tile_col_idx};
 
             // This boundary checking might slow down the kernel to some extent.
-            // That's why some specific data formats are beneficial for CUDA kernels.
-            T const val{(A_row_idx < m && A_col_idx < k) ? A[A_row_idx * k + A_col_idx] : static_cast<T>(0)};
+            // That's why some specific data formats are beneficial for CUDA
+            // kernels.
+            T const val{(A_row_idx < m && A_col_idx < k)
+                            ? A[A_row_idx * k + A_col_idx]
+                            : static_cast<T>(0)};
             A_thread_block_tile[A_thread_block_tile_row_idx]
                                [A_thread_block_tile_col_idx] = val;
-            
+
             // A_thread_block_tile[A_thread_block_tile_row_idx]
             //                    [A_thread_block_tile_col_idx] =
             //                        A[A_row_idx * k + A_col_idx];
@@ -747,11 +761,16 @@ __global__ void gemm_v5_1(size_t m, size_t n, size_t k, float alpha, T const* A,
                                    B_thread_block_tile_col_idx};
 
             // This boundary checking might slow down the kernel to some extent.
-            // That's why some specific data formats are beneficial for CUDA kernels.
-            // Normally, the CUDA examples showing good performance on the internet will not do this.
-            // Therefore, the correctness of their kernel is not guaranteed for all the GEMM configurations (m x n x k).
-            // As a general purpose kernel, you cannot claim performance without ensuring the correctness of all the corner cases.
-            T const val{(B_row_idx < k && B_col_idx < n) ? B[B_row_idx * n + B_col_idx] : static_cast<T>(0)};
+            // That's why some specific data formats are beneficial for CUDA
+            // kernels. Normally, the CUDA examples showing good performance on
+            // the internet will not do this. Therefore, the correctness of
+            // their kernel is not guaranteed for all the GEMM configurations (m
+            // x n x k). As a general purpose kernel, you cannot claim
+            // performance without ensuring the correctness of all the corner
+            // cases.
+            T const val{(B_row_idx < k && B_col_idx < n)
+                            ? B[B_row_idx * n + B_col_idx]
+                            : static_cast<T>(0)};
             B_thread_block_tile[B_thread_block_tile_row_idx]
                                [B_thread_block_tile_col_idx] = val;
             // B_thread_block_tile[B_thread_block_tile_row_idx]
@@ -777,8 +796,9 @@ __global__ void gemm_v5_1(size_t m, size_t n, size_t k, float alpha, T const* A,
             // size_t const B_thread_block_tile_col_idx{threadIdx.x %
             //                                          BLOCK_TILE_SIZE_X};
             // B_val is cached in the register.
-            T const B_val{B_thread_block_tile[B_thread_block_tile_row_idx]
-                                             [B_thread_block_tile_col_idx_cached]};
+            T const B_val{
+                B_thread_block_tile[B_thread_block_tile_row_idx]
+                                   [B_thread_block_tile_col_idx_cached]};
             for (size_t fragment_y_idx{0U};
                  fragment_y_idx < BLOCK_FRAGMENT_SIZE_Y; ++fragment_y_idx)
             {
@@ -814,80 +834,84 @@ __global__ void gemm_v5_1(size_t m, size_t n, size_t k, float alpha, T const* A,
 }
 
 template <typename T, const int BM, const int BN, const int BK, const int TM>
-__global__ void sgemm1DBlocktiling(int M, int N, int K, T alpha,
-                                   const T *A, const T *B, T beta,
-                                   T *C) {
-  // If we flip x and y here we get ~30% less performance for large matrices.
-  // The current, 30% faster configuration ensures that blocks with sequential
-  // blockIDs access columns of B sequentially, while sharing the same row of A.
-  // The slower configuration would share columns of A, but access into B would
-  // be non-sequential. So the faster configuration has better spatial locality
-  // and hence a greater L2 hit rate.
-  const uint cRow = blockIdx.y;
-  const uint cCol = blockIdx.x;
+__global__ void sgemm1DBlocktiling(int M, int N, int K, T alpha, const T* A,
+                                   const T* B, T beta, T* C)
+{
+    // If we flip x and y here we get ~30% less performance for large matrices.
+    // The current, 30% faster configuration ensures that blocks with sequential
+    // blockIDs access columns of B sequentially, while sharing the same row of
+    // A. The slower configuration would share columns of A, but access into B
+    // would be non-sequential. So the faster configuration has better spatial
+    // locality and hence a greater L2 hit rate.
+    const uint cRow = blockIdx.y;
+    const uint cCol = blockIdx.x;
 
-  // each warp will calculate 32*TM elements, with 32 being the columnar dim.
-  const int threadCol = threadIdx.x % BN;
-  const int threadRow = threadIdx.x / BN;
+    // each warp will calculate 32*TM elements, with 32 being the columnar dim.
+    const int threadCol = threadIdx.x % BN;
+    const int threadRow = threadIdx.x / BN;
 
-  // allocate space for the current blocktile in SMEM
-  __shared__ T As[BM * BK];
-  __shared__ T Bs[BK * BN];
+    // allocate space for the current blocktile in SMEM
+    __shared__ T As[BM * BK];
+    __shared__ T Bs[BK * BN];
 
-  // Move blocktile to beginning of A's row and B's column
-  A += cRow * BM * K;
-  B += cCol * BN;
-  C += cRow * BM * N + cCol * BN;
+    // Move blocktile to beginning of A's row and B's column
+    A += cRow * BM * K;
+    B += cCol * BN;
+    C += cRow * BM * N + cCol * BN;
 
-  // todo: adjust this to each thread to load multiple entries and
-  // better exploit the cache sizes
-  assert(BM * BK == blockDim.x);
-  assert(BN * BK == blockDim.x);
-  const uint innerColA = threadIdx.x % BK; // warp-level GMEM coalescing
-  const uint innerRowA = threadIdx.x / BK;
-  const uint innerColB = threadIdx.x % BN; // warp-level GMEM coalescing
-  const uint innerRowB = threadIdx.x / BN;
+    // todo: adjust this to each thread to load multiple entries and
+    // better exploit the cache sizes
+    assert(BM * BK == blockDim.x);
+    assert(BN * BK == blockDim.x);
+    const uint innerColA = threadIdx.x % BK; // warp-level GMEM coalescing
+    const uint innerRowA = threadIdx.x / BK;
+    const uint innerColB = threadIdx.x % BN; // warp-level GMEM coalescing
+    const uint innerRowB = threadIdx.x / BN;
 
-  // allocate thread-local cache for results in registerfile
-  T threadResults[TM] = {0.0};
+    // allocate thread-local cache for results in registerfile
+    T threadResults[TM] = {0.0};
 
-  // outer loop over block tiles
-  for (uint bkIdx = 0; bkIdx < K; bkIdx += BK) {
-    // populate the SMEM caches
-    As[innerRowA * BK + innerColA] = A[innerRowA * K + innerColA];
-    Bs[innerRowB * BN + innerColB] = B[innerRowB * N + innerColB];
-    __syncthreads();
+    // outer loop over block tiles
+    for (uint bkIdx = 0; bkIdx < K; bkIdx += BK)
+    {
+        // populate the SMEM caches
+        As[innerRowA * BK + innerColA] = A[innerRowA * K + innerColA];
+        Bs[innerRowB * BN + innerColB] = B[innerRowB * N + innerColB];
+        __syncthreads();
 
-    // advance blocktile
-    A += BK;
-    B += BK * N;
+        // advance blocktile
+        A += BK;
+        B += BK * N;
 
-    // calculate per-thread results
-    for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
-      // we make the dotproduct loop the outside loop, which facilitates
-      // reuse of the Bs entry, which we can cache in a tmp var.
-      T tmpB = Bs[dotIdx * BN + threadCol];
-      for (uint resIdx = 0; resIdx < TM; ++resIdx) {
-        threadResults[resIdx] +=
-            As[(threadRow * TM + resIdx) * BK + dotIdx] * tmpB;
-      }
+        // calculate per-thread results
+        for (uint dotIdx = 0; dotIdx < BK; ++dotIdx)
+        {
+            // we make the dotproduct loop the outside loop, which facilitates
+            // reuse of the Bs entry, which we can cache in a tmp var.
+            T tmpB = Bs[dotIdx * BN + threadCol];
+            for (uint resIdx = 0; resIdx < TM; ++resIdx)
+            {
+                threadResults[resIdx] +=
+                    As[(threadRow * TM + resIdx) * BK + dotIdx] * tmpB;
+            }
+        }
+        __syncthreads();
     }
-    __syncthreads();
-  }
 
-  // write out the results
-  for (uint resIdx = 0; resIdx < TM; ++resIdx) {
-    C[(threadRow * TM + resIdx) * N + threadCol] =
-        alpha * threadResults[resIdx] +
-        beta * C[(threadRow * TM + resIdx) * N + threadCol];
-  }
+    // write out the results
+    for (uint resIdx = 0; resIdx < TM; ++resIdx)
+    {
+        C[(threadRow * TM + resIdx) * N + threadCol] =
+            alpha * threadResults[resIdx] +
+            beta * C[(threadRow * TM + resIdx) * N + threadCol];
+    }
 }
 
 template <typename T,
           std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
 void launch_gemm_kernel_siboehm_v5(size_t m, size_t n, size_t k, float alpha,
-                           T const* A, T const* B, float beta, T* C,
-                           cudaStream_t stream)
+                                   T const* A, T const* B, float beta, T* C,
+                                   cudaStream_t stream)
 {
     // This kernel is sensitive to the parameters.
     // How to select good paramters?
@@ -919,12 +943,12 @@ void launch_gemm_kernel_siboehm_v5(size_t m, size_t n, size_t k, float alpha,
     // gemm_v5_1<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
     //         BLOCK_FRAGMENT_SIZE_Y>
     //     <<<grid_dim, block_dim, 0U, stream>>>(m, n, k, alpha, A, B, beta, C);
-    sgemm1DBlocktiling<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K, BLOCK_FRAGMENT_SIZE_Y>
+    sgemm1DBlocktiling<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y,
+                       BLOCK_TILE_SIZE_K, BLOCK_FRAGMENT_SIZE_Y>
         <<<grid_dim, block_dim, 0U, stream>>>(m, n, k, alpha, A, B, beta, C);
 
     CHECK_LAST_CUDA_ERROR();
 }
-
 
 template <typename T,
           std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
@@ -960,9 +984,10 @@ void launch_gemm_kernel_v5(size_t m, size_t n, size_t k, float alpha,
     //         BLOCK_FRAGMENT_SIZE_Y>
     //     <<<grid_dim, block_dim, 0U, stream>>>(m, n, k, alpha, A, B, beta, C);
     gemm_v5_1<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
-            BLOCK_FRAGMENT_SIZE_Y>
+              BLOCK_FRAGMENT_SIZE_Y>
         <<<grid_dim, block_dim, 0U, stream>>>(m, n, k, alpha, A, B, beta, C);
-    // sgemm1DBlocktiling<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K, BLOCK_FRAGMENT_SIZE_Y>
+    // sgemm1DBlocktiling<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y,
+    // BLOCK_TILE_SIZE_K, BLOCK_FRAGMENT_SIZE_Y>
     //     <<<grid_dim, block_dim, 0U, stream>>>(m, n, k, alpha, A, B, beta, C);
 
     CHECK_LAST_CUDA_ERROR();
@@ -992,7 +1017,6 @@ __launch_bounds__(BLOCK_TILE_SIZE_Y* BLOCK_TILE_SIZE_X /
     T B_vals[BLOCK_FRAGMENT_SIZE_X] = {static_cast<T>(0)};
     // A_vals is cached in the register.
     T A_vals[BLOCK_FRAGMENT_SIZE_Y] = {static_cast<T>(0)};
-
 
     constexpr unsigned int num_threads{
         BLOCK_TILE_SIZE_X * BLOCK_TILE_SIZE_Y /
@@ -1038,8 +1062,9 @@ __launch_bounds__(BLOCK_TILE_SIZE_Y* BLOCK_TILE_SIZE_X /
                                [A_thread_block_tile_col_idx] =
                                    A[A_row_idx * k + A_col_idx];
             // This boundary checking might slow down the kernel to some extent.
-            // That's why some specific data formats are beneficial for CUDA kernels.
-            // T const val{(A_row_idx < m && A_col_idx < k) ? A[A_row_idx * k + A_col_idx] : static_cast<T>(0)};
+            // That's why some specific data formats are beneficial for CUDA
+            // kernels. T const val{(A_row_idx < m && A_col_idx < k) ?
+            // A[A_row_idx * k + A_col_idx] : static_cast<T>(0)};
             // A_thread_block_tile[A_thread_block_tile_row_idx]
             //                    [A_thread_block_tile_col_idx] = val;
         }
@@ -1060,8 +1085,9 @@ __launch_bounds__(BLOCK_TILE_SIZE_Y* BLOCK_TILE_SIZE_X /
                                [B_thread_block_tile_col_idx] =
                                    B[B_row_idx * n + B_col_idx];
             // This boundary checking might slow down the kernel to some extent.
-            // That's why some specific data formats are beneficial for CUDA kernels.
-            // T const val{(B_row_idx < k && B_col_idx < n) ? B[B_row_idx * n + B_col_idx] : static_cast<T>(0)};
+            // That's why some specific data formats are beneficial for CUDA
+            // kernels. T const val{(B_row_idx < k && B_col_idx < n) ?
+            // B[B_row_idx * n + B_col_idx] : static_cast<T>(0)};
             // B_thread_block_tile[B_thread_block_tile_row_idx]
             //                    [B_thread_block_tile_col_idx] = val;
         }
@@ -1229,14 +1255,15 @@ __launch_bounds__(BLOCK_TILE_SIZE_Y* BLOCK_TILE_SIZE_X /
     // B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :]
     size_t const num_thread_block_tiles{(k + BLOCK_TILE_SIZE_K - 1U) /
                                         BLOCK_TILE_SIZE_K};
-    // Each thread in the block processes BLOCK_FRAGMENT_SIZE_Y * BLOCK_FRAGMENT_SIZE_X output values.
-    // Specifically, these values corresponds to
-    // C[blockIdx.y * BLOCK_TILE_SIZE_Y + threadIdx.x / BLOCK_TILE_SIZE_X *
-    // BLOCK_FRAGMENT_SIZE_Y : blockIdx.y * BLOCK_TILE_SIZE_Y + (threadIdx.x /
-    // BLOCK_TILE_SIZE_X + 1) * BLOCK_FRAGMENT_SIZE_Y][blockIdx.x *
-    // BLOCK_TILE_SIZE_X + threadIdx.x % BLOCK_TILE_SIZE_X *
-    // BLOCK_FRAGMENT_SIZE_X : blockIdx.x * BLOCK_TILE_SIZE_X + (threadIdx.x %
-    // BLOCK_TILE_SIZE_X + 1) * BLOCK_FRAGMENT_SIZE_X]
+    // Each thread in the block processes BLOCK_FRAGMENT_SIZE_Y *
+    // BLOCK_FRAGMENT_SIZE_X output values. Specifically, these values
+    // corresponds to C[blockIdx.y * BLOCK_TILE_SIZE_Y + threadIdx.x /
+    // BLOCK_TILE_SIZE_X * BLOCK_FRAGMENT_SIZE_Y : blockIdx.y *
+    // BLOCK_TILE_SIZE_Y + (threadIdx.x / BLOCK_TILE_SIZE_X + 1) *
+    // BLOCK_FRAGMENT_SIZE_Y][blockIdx.x * BLOCK_TILE_SIZE_X + threadIdx.x %
+    // BLOCK_TILE_SIZE_X * BLOCK_FRAGMENT_SIZE_X : blockIdx.x *
+    // BLOCK_TILE_SIZE_X + (threadIdx.x % BLOCK_TILE_SIZE_X + 1) *
+    // BLOCK_FRAGMENT_SIZE_X]
     T C_thread_results[BLOCK_FRAGMENT_SIZE_Y][BLOCK_FRAGMENT_SIZE_X] = {
         static_cast<T>(0)};
 
@@ -1262,10 +1289,11 @@ __launch_bounds__(BLOCK_TILE_SIZE_Y* BLOCK_TILE_SIZE_X /
             // A_thread_block_tile_transposed[A_thread_block_tile_col_idx]
             //                               [A_thread_block_tile_row_idx] =
             //                                   A[A_row_idx * k + A_col_idx];
-            T const val{(A_row_idx < m && A_col_idx < k) ? A[A_row_idx * k + A_col_idx] : static_cast<T>(0)};
+            T const val{(A_row_idx < m && A_col_idx < k)
+                            ? A[A_row_idx * k + A_col_idx]
+                            : static_cast<T>(0)};
             A_thread_block_tile_transposed[A_thread_block_tile_col_idx]
-                                          [A_thread_block_tile_row_idx] =
-                                              val;
+                                          [A_thread_block_tile_row_idx] = val;
         }
         // Load data from B on DRAM to B_thread_block_tile on shared memory.
         for (size_t load_idx{0U};
@@ -1283,7 +1311,9 @@ __launch_bounds__(BLOCK_TILE_SIZE_Y* BLOCK_TILE_SIZE_X /
             // B_thread_block_tile[B_thread_block_tile_row_idx]
             //                    [B_thread_block_tile_col_idx] =
             //                        B[B_row_idx * n + B_col_idx];
-            T const val{(B_row_idx < k && B_col_idx < n) ? B[B_row_idx * n + B_col_idx] : static_cast<T>(0)};
+            T const val{(B_row_idx < k && B_col_idx < n)
+                            ? B[B_row_idx * n + B_col_idx]
+                            : static_cast<T>(0)};
             B_thread_block_tile[B_thread_block_tile_row_idx]
                                [B_thread_block_tile_col_idx] = val;
         }
@@ -1397,7 +1427,8 @@ void launch_gemm_kernel_v7(size_t m, size_t n, size_t k, float alpha,
     // BLOCK_FRAGMENT_SIZE_Y elements. constexpr unsigned int
     // BLOCK_FRAGMENT_SIZE_X{4U}; constexpr unsigned int
     // BLOCK_FRAGMENT_SIZE_Y{4U};
-    constexpr unsigned int BLOCK_FRAGMENT_SIZE_X{8U}; // This might need to be named as THREAD_FRAGMENT_SIZE_X.
+    constexpr unsigned int BLOCK_FRAGMENT_SIZE_X{
+        8U}; // This might need to be named as THREAD_FRAGMENT_SIZE_X.
     constexpr unsigned int BLOCK_FRAGMENT_SIZE_Y{8U};
     constexpr unsigned int NUM_THREADS_PER_BLOCK{
         BLOCK_TILE_SIZE_X * BLOCK_TILE_SIZE_Y /
@@ -1420,30 +1451,29 @@ void launch_gemm_kernel_v7(size_t m, size_t n, size_t k, float alpha,
     CHECK_LAST_CUDA_ERROR();
 }
 
-
 // 2D warp tiling
 // Each thread in the block processes BLOCK_FRAGMENT_SIZE_Y *
 // BLOCK_FRAGMENT_SIZE_X output values. Number of threads BLOCK_TILE_SIZE_Y *
 // BLOCK_TILE_SIZE_X / (BLOCK_FRAGMENT_SIZE_Y * BLOCK_FRAGMENT_SIZE_X)
-template <typename T, unsigned int BLOCK_TILE_SIZE_X,
-          unsigned int BLOCK_TILE_SIZE_Y, unsigned int BLOCK_TILE_SIZE_K,
-          unsigned int WARP_FRAGMENT_SIZE_X,
-          unsigned int WARP_FRAGMENT_SIZE_Y,
-          unsigned int THREAD_FRAGMENT_SIZE_X,
-          unsigned int THREAD_FRAGMENT_SIZE_Y,
-          unsigned int NUM_THREADS_PER_WARP_X,
-          unsigned int NUM_THREADS_PER_WARP_Y,
-          std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
-__global__ void gemm_v8(size_t m, size_t n, size_t k, float alpha, T const* A, T const* B,
-            float beta, T* C)
+template <
+    typename T, unsigned int BLOCK_TILE_SIZE_X, unsigned int BLOCK_TILE_SIZE_Y,
+    unsigned int BLOCK_TILE_SIZE_K, unsigned int WARP_FRAGMENT_SIZE_X,
+    unsigned int WARP_FRAGMENT_SIZE_Y, unsigned int THREAD_FRAGMENT_SIZE_X,
+    unsigned int THREAD_FRAGMENT_SIZE_Y, unsigned int NUM_THREADS_PER_WARP_X,
+    unsigned int NUM_THREADS_PER_WARP_Y,
+    std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
+__global__ void gemm_v8(size_t m, size_t n, size_t k, float alpha, T const* A,
+                        T const* B, float beta, T* C)
 {
     static_assert(NUM_THREADS_PER_WARP_X * NUM_THREADS_PER_WARP_Y == 32U);
     constexpr size_t NUM_WARPS_X{BLOCK_TILE_SIZE_X / WARP_FRAGMENT_SIZE_X};
     constexpr size_t NUM_WARPS_Y{BLOCK_TILE_SIZE_Y / WARP_FRAGMENT_SIZE_Y};
-    constexpr unsigned int NUM_THREAD_TILES_PER_WARP_X{WARP_FRAGMENT_SIZE_X /
-                                                        (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X)};
-    constexpr unsigned int NUM_THREAD_TILES_PER_WARP_Y{WARP_FRAGMENT_SIZE_Y /
-                                                        (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y)};
+    constexpr unsigned int NUM_THREAD_TILES_PER_WARP_X{
+        WARP_FRAGMENT_SIZE_X /
+        (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X)};
+    constexpr unsigned int NUM_THREAD_TILES_PER_WARP_Y{
+        WARP_FRAGMENT_SIZE_Y /
+        (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y)};
 
     constexpr unsigned int NUM_THREADS_X{NUM_WARPS_X * NUM_THREADS_PER_WARP_X};
     constexpr unsigned int NUM_THREADS_Y{NUM_WARPS_Y * NUM_THREADS_PER_WARP_Y};
@@ -1456,9 +1486,11 @@ __global__ void gemm_v8(size_t m, size_t n, size_t k, float alpha, T const* A, T
     __shared__ T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X];
 
     // B_vals is cached in the register.
-    T B_vals[NUM_THREAD_TILES_PER_WARP_X][THREAD_FRAGMENT_SIZE_X] = {static_cast<T>(0)};
+    T B_vals[NUM_THREAD_TILES_PER_WARP_X][THREAD_FRAGMENT_SIZE_X] = {
+        static_cast<T>(0)};
     // A_vals is cached in the register.
-    T A_vals[NUM_THREAD_TILES_PER_WARP_Y][THREAD_FRAGMENT_SIZE_Y] = {static_cast<T>(0)};
+    T A_vals[NUM_THREAD_TILES_PER_WARP_Y][THREAD_FRAGMENT_SIZE_Y] = {
+        static_cast<T>(0)};
 
     // size_t const num_threads{blockDim.x};
     constexpr size_t num_threads{NUM_THREADS_PER_BLOCK};
@@ -1467,8 +1499,10 @@ __global__ void gemm_v8(size_t m, size_t n, size_t k, float alpha, T const* A, T
     size_t const warp_row_idx{warp_linear_idx / NUM_WARPS_X};
     size_t const warp_col_idx{warp_linear_idx % NUM_WARPS_X};
     size_t const thread_linear_idx_in_warp{threadIdx.x % 32U};
-    size_t const thread_linear_row_idx_in_warp{thread_linear_idx_in_warp / NUM_THREADS_PER_WARP_X};
-    size_t const thread_linear_col_idx_in_warp{thread_linear_idx_in_warp % NUM_THREADS_PER_WARP_X};
+    size_t const thread_linear_row_idx_in_warp{thread_linear_idx_in_warp /
+                                               NUM_THREADS_PER_WARP_X};
+    size_t const thread_linear_col_idx_in_warp{thread_linear_idx_in_warp %
+                                               NUM_THREADS_PER_WARP_X};
 
     // Number of outer loops to perform the sum of inner products.
     // C_thread_block_tile =
@@ -1477,11 +1511,14 @@ __global__ void gemm_v8(size_t m, size_t n, size_t k, float alpha, T const* A, T
     // B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :]
     size_t const num_thread_block_tiles{(k + BLOCK_TILE_SIZE_K - 1U) /
                                         BLOCK_TILE_SIZE_K};
-    // Each thread in the block processes NUM_THREAD_TILES_PER_WARP_Y * NUM_THREAD_TILES_PER_WARP_X * THREAD_FRAGMENT_SIZE_Y * THREAD_FRAGMENT_SIZE_X output values.
-    // Specifically, these values corresponds to
-    // 
-    T C_thread_results[NUM_THREAD_TILES_PER_WARP_Y][NUM_THREAD_TILES_PER_WARP_X][THREAD_FRAGMENT_SIZE_Y][THREAD_FRAGMENT_SIZE_X] = {
-        static_cast<T>(0)};
+    // Each thread in the block processes NUM_THREAD_TILES_PER_WARP_Y *
+    // NUM_THREAD_TILES_PER_WARP_X * THREAD_FRAGMENT_SIZE_Y *
+    // THREAD_FRAGMENT_SIZE_X output values. Specifically, these values
+    // corresponds to
+    //
+    T C_thread_results[NUM_THREAD_TILES_PER_WARP_Y][NUM_THREAD_TILES_PER_WARP_X]
+                      [THREAD_FRAGMENT_SIZE_Y][THREAD_FRAGMENT_SIZE_X] = {
+                          static_cast<T>(0)};
 
     for (size_t thread_block_tile_idx{0U};
          thread_block_tile_idx < num_thread_block_tiles;
@@ -1491,23 +1528,32 @@ __global__ void gemm_v8(size_t m, size_t n, size_t k, float alpha, T const* A, T
         // Load data from A on DRAM to A_thread_block_tile on shared memory.
         // #pragma unroll
         for (size_t load_idx{0U};
-             load_idx < BLOCK_TILE_SIZE_Y * BLOCK_TILE_SIZE_K / num_threads; // Using NUM_THREADS_PER_BLOCK instead of num_threads results in larger numerical error. Crazy ?!
+             load_idx < BLOCK_TILE_SIZE_Y * BLOCK_TILE_SIZE_K /
+                            num_threads; // Using NUM_THREADS_PER_BLOCK instead
+                                         // of num_threads results in larger
+                                         // numerical error. Crazy ?!
              ++load_idx)
         {
             size_t const A_thread_block_tile_row_idx{
-                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) / BLOCK_TILE_SIZE_K};
+                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) /
+                BLOCK_TILE_SIZE_K};
             size_t const A_thread_block_tile_col_idx{
-                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) % BLOCK_TILE_SIZE_K};
+                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) %
+                BLOCK_TILE_SIZE_K};
             size_t const A_row_idx{blockIdx.y * BLOCK_TILE_SIZE_Y +
                                    A_thread_block_tile_row_idx};
             size_t const A_col_idx{thread_block_tile_idx * BLOCK_TILE_SIZE_K +
                                    A_thread_block_tile_col_idx};
-            A_thread_block_tile_transposed[A_thread_block_tile_col_idx][A_thread_block_tile_row_idx] = A[A_row_idx * k + A_col_idx];
+            A_thread_block_tile_transposed[A_thread_block_tile_col_idx]
+                                          [A_thread_block_tile_row_idx] =
+                                              A[A_row_idx * k + A_col_idx];
             // This boundary checking might slow down the kernel to some extent.
-            // That's why some specific data formats are beneficial for CUDA kernels.
-            // T const val{(A_row_idx < m && A_col_idx < k) ? A[A_row_idx * k + A_col_idx] : static_cast<T>(0)};
+            // That's why some specific data formats are beneficial for CUDA
+            // kernels. T const val{(A_row_idx < m && A_col_idx < k) ?
+            // A[A_row_idx * k + A_col_idx] : static_cast<T>(0)};
             // A_thread_block_tile_transposed[A_thread_block_tile_col_idx]
-            //                               [A_thread_block_tile_row_idx] = val;
+            //                               [A_thread_block_tile_row_idx] =
+            //                               val;
         }
         // Load data from B on DRAM to B_thread_block_tile on shared memory.
         // #pragma unroll
@@ -1516,75 +1562,119 @@ __global__ void gemm_v8(size_t m, size_t n, size_t k, float alpha, T const* A, T
              ++load_idx)
         {
             size_t const B_thread_block_tile_row_idx{
-                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) / BLOCK_TILE_SIZE_X};
+                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) /
+                BLOCK_TILE_SIZE_X};
             size_t const B_thread_block_tile_col_idx{
-                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) % BLOCK_TILE_SIZE_X};
+                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) %
+                BLOCK_TILE_SIZE_X};
             size_t const B_row_idx{thread_block_tile_idx * BLOCK_TILE_SIZE_K +
                                    B_thread_block_tile_row_idx};
             size_t const B_col_idx{blockIdx.x * BLOCK_TILE_SIZE_X +
                                    B_thread_block_tile_col_idx};
             B_thread_block_tile[B_thread_block_tile_row_idx]
-                               [B_thread_block_tile_col_idx] = B[B_row_idx * n + B_col_idx];
+                               [B_thread_block_tile_col_idx] =
+                                   B[B_row_idx * n + B_col_idx];
             // This boundary checking might slow down the kernel to some extent.
-            // That's why some specific data formats are beneficial for CUDA kernels.
-            // T const val{(B_row_idx < k && B_col_idx < n) ? B[B_row_idx * n + B_col_idx] : static_cast<T>(0)};
+            // That's why some specific data formats are beneficial for CUDA
+            // kernels. T const val{(B_row_idx < k && B_col_idx < n) ?
+            // B[B_row_idx * n + B_col_idx] : static_cast<T>(0)};
             // B_thread_block_tile[B_thread_block_tile_row_idx]
             //                    [B_thread_block_tile_col_idx] = val;
         }
         __syncthreads();
 
-        // Perform A[:, thread_block_tile_idx:BLOCK_TILE_SIZE_K] *
-        // B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] where A[:,
-        // thread_block_tile_idx:BLOCK_TILE_SIZE_K] and
-        // B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] are cached in the
-        // shared memory as A_thread_block_tile and B_thread_block_tile,
-        // respectively. This inner product is further decomposed to
-        // BLOCK_TILE_SIZE_K outer products. A_thread_block_tile *
-        // B_thread_block_tile = \sigma_{k_i=0}^{BLOCK_TILE_SIZE_K-1}
-        // A_thread_block_tile[:, k_i] @ B_thread_block_tile[k_i, :] Note that
-        // both A_thread_block_tile and B_thread_block_tile can be cached in the
-        // register.
-        // Can use pragma unroll to unroll these static loops to see if there is a performance gain.
-        #pragma unroll
+// Perform A[:, thread_block_tile_idx:BLOCK_TILE_SIZE_K] *
+// B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] where A[:,
+// thread_block_tile_idx:BLOCK_TILE_SIZE_K] and
+// B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] are cached in the
+// shared memory as A_thread_block_tile and B_thread_block_tile,
+// respectively. This inner product is further decomposed to
+// BLOCK_TILE_SIZE_K outer products. A_thread_block_tile *
+// B_thread_block_tile = \sigma_{k_i=0}^{BLOCK_TILE_SIZE_K-1}
+// A_thread_block_tile[:, k_i] @ B_thread_block_tile[k_i, :] Note that
+// both A_thread_block_tile and B_thread_block_tile can be cached in the
+// register.
+// Can use pragma unroll to unroll these static loops to see if there is a
+// performance gain.
+#pragma unroll
         for (size_t k_i{0U}; k_i < BLOCK_TILE_SIZE_K; ++k_i)
         {
-            #pragma unroll
-            for (size_t thread_tile_row_idx{0U}; thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y; ++thread_tile_row_idx)
+#pragma unroll
+            for (size_t thread_tile_row_idx{0U};
+                 thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y;
+                 ++thread_tile_row_idx)
             {
-                size_t const A_thread_block_tile_row_idx{warp_row_idx * WARP_FRAGMENT_SIZE_Y + thread_tile_row_idx * (WARP_FRAGMENT_SIZE_Y / NUM_THREAD_TILES_PER_WARP_Y) + thread_linear_row_idx_in_warp * THREAD_FRAGMENT_SIZE_Y};
+                size_t const A_thread_block_tile_row_idx{
+                    warp_row_idx * WARP_FRAGMENT_SIZE_Y +
+                    thread_tile_row_idx *
+                        (WARP_FRAGMENT_SIZE_Y / NUM_THREAD_TILES_PER_WARP_Y) +
+                    thread_linear_row_idx_in_warp * THREAD_FRAGMENT_SIZE_Y};
                 size_t const A_thread_block_tile_col_idx{k_i};
-                #pragma unroll
-                for (size_t thread_fragment_y_idx{0U}; thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y; ++thread_fragment_y_idx)
+#pragma unroll
+                for (size_t thread_fragment_y_idx{0U};
+                     thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y;
+                     ++thread_fragment_y_idx)
                 {
-                    A_vals[thread_tile_row_idx][thread_fragment_y_idx] = A_thread_block_tile_transposed[A_thread_block_tile_col_idx][A_thread_block_tile_row_idx + thread_fragment_y_idx];
+                    A_vals[thread_tile_row_idx][thread_fragment_y_idx] =
+                        A_thread_block_tile_transposed
+                            [A_thread_block_tile_col_idx]
+                            [A_thread_block_tile_row_idx +
+                             thread_fragment_y_idx];
                 }
             }
-            #pragma unroll
-            for (size_t thread_tile_col_idx{0U}; thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X; ++thread_tile_col_idx)
+#pragma unroll
+            for (size_t thread_tile_col_idx{0U};
+                 thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X;
+                 ++thread_tile_col_idx)
             {
                 size_t const B_thread_block_tile_row_idx{k_i};
-                size_t const B_thread_block_tile_col_idx{warp_col_idx * WARP_FRAGMENT_SIZE_X + thread_tile_col_idx * (WARP_FRAGMENT_SIZE_X / NUM_THREAD_TILES_PER_WARP_X) + thread_linear_col_idx_in_warp * THREAD_FRAGMENT_SIZE_X};
-                #pragma unroll
-                for (size_t thread_fragment_x_idx{0U}; thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X; ++thread_fragment_x_idx)
+                size_t const B_thread_block_tile_col_idx{
+                    warp_col_idx * WARP_FRAGMENT_SIZE_X +
+                    thread_tile_col_idx *
+                        (WARP_FRAGMENT_SIZE_X / NUM_THREAD_TILES_PER_WARP_X) +
+                    thread_linear_col_idx_in_warp * THREAD_FRAGMENT_SIZE_X};
+#pragma unroll
+                for (size_t thread_fragment_x_idx{0U};
+                     thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X;
+                     ++thread_fragment_x_idx)
                 {
-                    B_vals[thread_tile_col_idx][thread_fragment_x_idx] = B_thread_block_tile[B_thread_block_tile_row_idx][B_thread_block_tile_col_idx + thread_fragment_x_idx];
+                    B_vals[thread_tile_col_idx][thread_fragment_x_idx] =
+                        B_thread_block_tile[B_thread_block_tile_row_idx]
+                                           [B_thread_block_tile_col_idx +
+                                            thread_fragment_x_idx];
                 }
             }
 
-            // Compute NUM_THREAD_TILES_PER_WARP_Y * NUM_THREAD_TILES_PER_WARP_X outer products.
-            #pragma unroll
-            for (size_t thread_tile_row_idx{0U}; thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y; ++thread_tile_row_idx)
+// Compute NUM_THREAD_TILES_PER_WARP_Y * NUM_THREAD_TILES_PER_WARP_X outer
+// products.
+#pragma unroll
+            for (size_t thread_tile_row_idx{0U};
+                 thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y;
+                 ++thread_tile_row_idx)
             {
-                #pragma unroll
-                for (size_t thread_tile_col_idx{0U}; thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X; ++thread_tile_col_idx)
+#pragma unroll
+                for (size_t thread_tile_col_idx{0U};
+                     thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X;
+                     ++thread_tile_col_idx)
                 {
-                    #pragma unroll
-                    for (size_t thread_fragment_y_idx{0U}; thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y; ++thread_fragment_y_idx)
+#pragma unroll
+                    for (size_t thread_fragment_y_idx{0U};
+                         thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y;
+                         ++thread_fragment_y_idx)
                     {
-                        #pragma unroll
-                        for (size_t thread_fragment_x_idx{0U}; thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X; ++thread_fragment_x_idx)
+#pragma unroll
+                        for (size_t thread_fragment_x_idx{0U};
+                             thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X;
+                             ++thread_fragment_x_idx)
                         {
-                            C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx] += A_vals[thread_tile_row_idx][thread_fragment_y_idx] * B_vals[thread_tile_col_idx][thread_fragment_x_idx];
+                            C_thread_results[thread_tile_row_idx]
+                                            [thread_tile_col_idx]
+                                            [thread_fragment_y_idx]
+                                            [thread_fragment_x_idx] +=
+                                A_vals[thread_tile_row_idx]
+                                      [thread_fragment_y_idx] *
+                                B_vals[thread_tile_col_idx]
+                                      [thread_fragment_x_idx];
                         }
                     }
                 }
@@ -1596,25 +1686,48 @@ __global__ void gemm_v8(size_t m, size_t n, size_t k, float alpha, T const* A, T
     // Need a synchronization before writing the results to DRAM.
     __syncthreads();
 
-    // Write the results to DRAM.
-    #pragma unroll
-    for (size_t thread_tile_row_idx{0U}; thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y; ++thread_tile_row_idx)
+// Write the results to DRAM.
+#pragma unroll
+    for (size_t thread_tile_row_idx{0U};
+         thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y;
+         ++thread_tile_row_idx)
     {
-        #pragma unroll
-        for (size_t thread_tile_col_idx{0U}; thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X; ++thread_tile_col_idx)
+#pragma unroll
+        for (size_t thread_tile_col_idx{0U};
+             thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X;
+             ++thread_tile_col_idx)
         {
-            #pragma unroll
-            for (size_t thread_fragment_y_idx{0U}; thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y; ++thread_fragment_y_idx)
+#pragma unroll
+            for (size_t thread_fragment_y_idx{0U};
+                 thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y;
+                 ++thread_fragment_y_idx)
             {
-                #pragma unroll
-                for (size_t thread_fragment_x_idx{0U}; thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X; ++thread_fragment_x_idx)
+#pragma unroll
+                for (size_t thread_fragment_x_idx{0U};
+                     thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X;
+                     ++thread_fragment_x_idx)
                 {
-                    size_t const C_row_idx{blockIdx.y * BLOCK_TILE_SIZE_Y + warp_row_idx * WARP_FRAGMENT_SIZE_Y + thread_tile_row_idx * (WARP_FRAGMENT_SIZE_Y / NUM_THREAD_TILES_PER_WARP_Y) + thread_linear_row_idx_in_warp * THREAD_FRAGMENT_SIZE_Y + thread_fragment_y_idx};
-                    size_t const C_col_idx{blockIdx.x * BLOCK_TILE_SIZE_X + warp_col_idx * WARP_FRAGMENT_SIZE_X + thread_tile_col_idx * (WARP_FRAGMENT_SIZE_X / NUM_THREAD_TILES_PER_WARP_X) + thread_linear_col_idx_in_warp * THREAD_FRAGMENT_SIZE_X + thread_fragment_x_idx};
+                    size_t const C_row_idx{
+                        blockIdx.y * BLOCK_TILE_SIZE_Y +
+                        warp_row_idx * WARP_FRAGMENT_SIZE_Y +
+                        thread_tile_row_idx * (WARP_FRAGMENT_SIZE_Y /
+                                               NUM_THREAD_TILES_PER_WARP_Y) +
+                        thread_linear_row_idx_in_warp * THREAD_FRAGMENT_SIZE_Y +
+                        thread_fragment_y_idx};
+                    size_t const C_col_idx{
+                        blockIdx.x * BLOCK_TILE_SIZE_X +
+                        warp_col_idx * WARP_FRAGMENT_SIZE_X +
+                        thread_tile_col_idx * (WARP_FRAGMENT_SIZE_X /
+                                               NUM_THREAD_TILES_PER_WARP_X) +
+                        thread_linear_col_idx_in_warp * THREAD_FRAGMENT_SIZE_X +
+                        thread_fragment_x_idx};
                     if (C_row_idx < m && C_col_idx < n)
                     {
                         C[C_row_idx * n + C_col_idx] =
-                            alpha * C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx] +
+                            alpha * C_thread_results[thread_tile_row_idx]
+                                                    [thread_tile_col_idx]
+                                                    [thread_fragment_y_idx]
+                                                    [thread_fragment_x_idx] +
                             beta * C[C_row_idx * n + C_col_idx];
                     }
                 }
@@ -1622,7 +1735,6 @@ __global__ void gemm_v8(size_t m, size_t n, size_t k, float alpha, T const* A, T
         }
     }
 }
-
 
 template <typename T,
           std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
@@ -1642,8 +1754,10 @@ void launch_gemm_kernel_v8(size_t m, size_t n, size_t k, float alpha,
     constexpr unsigned int WARP_FRAGMENT_SIZE_X{32U};
     constexpr unsigned int WARP_FRAGMENT_SIZE_Y{64U};
 
-    constexpr unsigned int NUM_WARPS_X{BLOCK_TILE_SIZE_X / WARP_FRAGMENT_SIZE_X};
-    constexpr unsigned int NUM_WARPS_Y{BLOCK_TILE_SIZE_Y / WARP_FRAGMENT_SIZE_Y};
+    constexpr unsigned int NUM_WARPS_X{BLOCK_TILE_SIZE_X /
+                                       WARP_FRAGMENT_SIZE_X};
+    constexpr unsigned int NUM_WARPS_Y{BLOCK_TILE_SIZE_Y /
+                                       WARP_FRAGMENT_SIZE_Y};
     static_assert(BLOCK_TILE_SIZE_X % WARP_FRAGMENT_SIZE_X == 0U);
     static_assert(BLOCK_TILE_SIZE_Y % WARP_FRAGMENT_SIZE_Y == 0U);
 
@@ -1654,12 +1768,18 @@ void launch_gemm_kernel_v8(size_t m, size_t n, size_t k, float alpha,
     constexpr unsigned int NUM_THREADS_PER_WARP_Y{8U};
 
     // constexpr unsigned int NUM_THREAD_TILES_PER_WARP_X{WARP_FRAGMENT_SIZE_X /
-    //                                                     (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X)};
+    //                                                     (THREAD_FRAGMENT_SIZE_X
+    //                                                     * NUM_THREADS_PER_WARP_X)};
     // constexpr unsigned int NUM_THREAD_TILES_PER_WARP_Y{WARP_FRAGMENT_SIZE_Y /
-    //                                                     (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y)};
+    //                                                     (THREAD_FRAGMENT_SIZE_Y
+    //                                                     * NUM_THREADS_PER_WARP_Y)};
 
-    static_assert(WARP_FRAGMENT_SIZE_X % (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X) == 0U);
-    static_assert(WARP_FRAGMENT_SIZE_Y % (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y) == 0U);
+    static_assert(WARP_FRAGMENT_SIZE_X %
+                      (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X) ==
+                  0U);
+    static_assert(WARP_FRAGMENT_SIZE_Y %
+                      (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y) ==
+                  0U);
 
     constexpr unsigned int NUM_THREADS_X{NUM_WARPS_X * NUM_THREADS_PER_WARP_X};
     constexpr unsigned int NUM_THREADS_Y{NUM_WARPS_Y * NUM_THREADS_PER_WARP_Y};
@@ -1674,34 +1794,36 @@ void launch_gemm_kernel_v8(size_t m, size_t n, size_t k, float alpha,
         (static_cast<unsigned int>(m) + BLOCK_TILE_SIZE_Y - 1U) /
             BLOCK_TILE_SIZE_Y,
         1U};
-    gemm_v8<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K, WARP_FRAGMENT_SIZE_X, WARP_FRAGMENT_SIZE_Y, THREAD_FRAGMENT_SIZE_X, THREAD_FRAGMENT_SIZE_Y, NUM_THREADS_PER_WARP_X, NUM_THREADS_PER_WARP_Y>
+    gemm_v8<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+            WARP_FRAGMENT_SIZE_X, WARP_FRAGMENT_SIZE_Y, THREAD_FRAGMENT_SIZE_X,
+            THREAD_FRAGMENT_SIZE_Y, NUM_THREADS_PER_WARP_X,
+            NUM_THREADS_PER_WARP_Y>
         <<<grid_dim, block_dim, 0U, stream>>>(m, n, k, alpha, A, B, beta, C);
     CHECK_LAST_CUDA_ERROR();
 }
-
 
 // 2D warp tiling with vectorized data IO
 // Each thread in the block processes BLOCK_FRAGMENT_SIZE_Y *
 // BLOCK_FRAGMENT_SIZE_X output values. Number of threads BLOCK_TILE_SIZE_Y *
 // BLOCK_TILE_SIZE_X / (BLOCK_FRAGMENT_SIZE_Y * BLOCK_FRAGMENT_SIZE_X)
-template <typename T, unsigned int BLOCK_TILE_SIZE_X,
-          unsigned int BLOCK_TILE_SIZE_Y, unsigned int BLOCK_TILE_SIZE_K,
-          unsigned int WARP_FRAGMENT_SIZE_X,
-          unsigned int WARP_FRAGMENT_SIZE_Y,
-          unsigned int THREAD_FRAGMENT_SIZE_X,
-          unsigned int THREAD_FRAGMENT_SIZE_Y,
-          unsigned int NUM_THREADS_PER_WARP_X,
-          unsigned int NUM_THREADS_PER_WARP_Y>
-__global__ void gemm_v9(size_t m, size_t n, size_t k, float alpha, T const* A, T const* B,
-            float beta, T* C)
+template <
+    typename T, unsigned int BLOCK_TILE_SIZE_X, unsigned int BLOCK_TILE_SIZE_Y,
+    unsigned int BLOCK_TILE_SIZE_K, unsigned int WARP_FRAGMENT_SIZE_X,
+    unsigned int WARP_FRAGMENT_SIZE_Y, unsigned int THREAD_FRAGMENT_SIZE_X,
+    unsigned int THREAD_FRAGMENT_SIZE_Y, unsigned int NUM_THREADS_PER_WARP_X,
+    unsigned int NUM_THREADS_PER_WARP_Y>
+__global__ void gemm_v9(size_t m, size_t n, size_t k, float alpha, T const* A,
+                        T const* B, float beta, T* C)
 {
     static_assert(NUM_THREADS_PER_WARP_X * NUM_THREADS_PER_WARP_Y == 32U);
     constexpr size_t NUM_WARPS_X{BLOCK_TILE_SIZE_X / WARP_FRAGMENT_SIZE_X};
     constexpr size_t NUM_WARPS_Y{BLOCK_TILE_SIZE_Y / WARP_FRAGMENT_SIZE_Y};
-    constexpr unsigned int NUM_THREAD_TILES_PER_WARP_X{WARP_FRAGMENT_SIZE_X /
-                                                        (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X)};
-    constexpr unsigned int NUM_THREAD_TILES_PER_WARP_Y{WARP_FRAGMENT_SIZE_Y /
-                                                        (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y)};
+    constexpr unsigned int NUM_THREAD_TILES_PER_WARP_X{
+        WARP_FRAGMENT_SIZE_X /
+        (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X)};
+    constexpr unsigned int NUM_THREAD_TILES_PER_WARP_Y{
+        WARP_FRAGMENT_SIZE_Y /
+        (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y)};
 
     constexpr unsigned int NUM_THREADS_X{NUM_WARPS_X * NUM_THREADS_PER_WARP_X};
     constexpr unsigned int NUM_THREADS_Y{NUM_WARPS_Y * NUM_THREADS_PER_WARP_Y};
@@ -1716,9 +1838,11 @@ __global__ void gemm_v9(size_t m, size_t n, size_t k, float alpha, T const* A, T
     __shared__ T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X];
 
     // B_vals is cached in the register.
-    T B_vals[NUM_THREAD_TILES_PER_WARP_X][THREAD_FRAGMENT_SIZE_X] = {static_cast<T>(0)};
+    T B_vals[NUM_THREAD_TILES_PER_WARP_X][THREAD_FRAGMENT_SIZE_X] = {
+        static_cast<T>(0)};
     // A_vals is cached in the register.
-    T A_vals[NUM_THREAD_TILES_PER_WARP_Y][THREAD_FRAGMENT_SIZE_Y] = {static_cast<T>(0)};
+    T A_vals[NUM_THREAD_TILES_PER_WARP_Y][THREAD_FRAGMENT_SIZE_Y] = {
+        static_cast<T>(0)};
 
     // size_t const num_threads{blockDim.x};
     constexpr size_t num_threads{NUM_THREADS_PER_BLOCK};
@@ -1727,8 +1851,10 @@ __global__ void gemm_v9(size_t m, size_t n, size_t k, float alpha, T const* A, T
     size_t const warp_row_idx{warp_linear_idx / NUM_WARPS_X};
     size_t const warp_col_idx{warp_linear_idx % NUM_WARPS_X};
     size_t const thread_linear_idx_in_warp{threadIdx.x % 32U};
-    size_t const thread_linear_row_idx_in_warp{thread_linear_idx_in_warp / NUM_THREADS_PER_WARP_X};
-    size_t const thread_linear_col_idx_in_warp{thread_linear_idx_in_warp % NUM_THREADS_PER_WARP_X};
+    size_t const thread_linear_row_idx_in_warp{thread_linear_idx_in_warp /
+                                               NUM_THREADS_PER_WARP_X};
+    size_t const thread_linear_col_idx_in_warp{thread_linear_idx_in_warp %
+                                               NUM_THREADS_PER_WARP_X};
 
     // Number of outer loops to perform the sum of inner products.
     // C_thread_block_tile =
@@ -1737,27 +1863,37 @@ __global__ void gemm_v9(size_t m, size_t n, size_t k, float alpha, T const* A, T
     // B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :]
     size_t const num_thread_block_tiles{(k + BLOCK_TILE_SIZE_K - 1U) /
                                         BLOCK_TILE_SIZE_K};
-    // Each thread in the block processes NUM_THREAD_TILES_PER_WARP_Y * NUM_THREAD_TILES_PER_WARP_X * THREAD_FRAGMENT_SIZE_Y * THREAD_FRAGMENT_SIZE_X output values.
-    // Specifically, these values corresponds to
-    // 
-    T C_thread_results[NUM_THREAD_TILES_PER_WARP_Y][NUM_THREAD_TILES_PER_WARP_X][THREAD_FRAGMENT_SIZE_Y][THREAD_FRAGMENT_SIZE_X] = {
-        static_cast<T>(0)};
+    // Each thread in the block processes NUM_THREAD_TILES_PER_WARP_Y *
+    // NUM_THREAD_TILES_PER_WARP_X * THREAD_FRAGMENT_SIZE_Y *
+    // THREAD_FRAGMENT_SIZE_X output values. Specifically, these values
+    // corresponds to
+    //
+    T C_thread_results[NUM_THREAD_TILES_PER_WARP_Y][NUM_THREAD_TILES_PER_WARP_X]
+                      [THREAD_FRAGMENT_SIZE_Y][THREAD_FRAGMENT_SIZE_X] = {
+                          static_cast<T>(0)};
 
     for (size_t thread_block_tile_idx{0U};
          thread_block_tile_idx < num_thread_block_tiles;
          ++thread_block_tile_idx)
     {
-        // Question / TODO: Can this load function be a warp based function?
-        // Load data from A on DRAM to A_thread_block_tile on shared memory.
-        #pragma unroll
+// Question / TODO: Can this load function be a warp based function?
+// Load data from A on DRAM to A_thread_block_tile on shared memory.
+#pragma unroll
         for (size_t load_idx{0U};
-             load_idx < BLOCK_TILE_SIZE_Y * BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS / num_threads; // Using NUM_THREADS_PER_BLOCK instead of num_threads results in larger numerical error. Crazy ?!
+             load_idx < BLOCK_TILE_SIZE_Y * BLOCK_TILE_SIZE_K /
+                            NUM_VECTOR_UNITS /
+                            num_threads; // Using NUM_THREADS_PER_BLOCK instead
+                                         // of num_threads results in larger
+                                         // numerical error. Crazy ?!
              ++load_idx)
         {
             size_t const A_thread_block_tile_row_idx{
-                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) / (BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS)};
+                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) /
+                (BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS)};
             size_t const A_thread_block_tile_col_idx{
-                ((threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) % (BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS)) * NUM_VECTOR_UNITS};
+                ((threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) %
+                 (BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS)) *
+                NUM_VECTOR_UNITS};
             size_t const A_row_idx{blockIdx.y * BLOCK_TILE_SIZE_Y +
                                    A_thread_block_tile_row_idx};
             size_t const A_col_idx{thread_block_tile_idx * BLOCK_TILE_SIZE_K +
@@ -1765,134 +1901,217 @@ __global__ void gemm_v9(size_t m, size_t n, size_t k, float alpha, T const* A, T
             // A_thread_block_tile[A_thread_block_tile_row_idx][A_thread_block_tile_col_idx]
             // = A[A_row_idx * k + A_col_idx];
             // This boundary checking might slow down the kernel to some extent.
-            // That's why some specific data formats are beneficial for CUDA kernels.
-            // float4 const val{(A_row_idx < m && A_col_idx < k) ? *reinterpret_cast<float4 const*>(&A[A_row_idx * k + A_col_idx]) : float4{0.f, 0.f, 0.f, 0.f}};
+            // That's why some specific data formats are beneficial for CUDA
+            // kernels. float4 const val{(A_row_idx < m && A_col_idx < k) ?
+            // *reinterpret_cast<float4 const*>(&A[A_row_idx * k + A_col_idx]) :
+            // float4{0.f, 0.f, 0.f, 0.f}};
 
             // float4 val{0.f, 0.f, 0.f, 0.f};
-            // if ((k - A_col_idx) / NUM_VECTOR_UNITS == 0U && (k - A_col_idx) % NUM_VECTOR_UNITS != 0U)
+            // if ((k - A_col_idx) / NUM_VECTOR_UNITS == 0U && (k - A_col_idx) %
+            // NUM_VECTOR_UNITS != 0U)
             // {
             //     size_t const num_remains{(k - A_col_idx) % NUM_VECTOR_UNITS};
-            //     for (size_t vector_unit_idx{0U}; vector_unit_idx < num_remains; ++vector_unit_idx)
+            //     for (size_t vector_unit_idx{0U}; vector_unit_idx <
+            //     num_remains; ++vector_unit_idx)
             //     {
-            //         T const val_single{(A_row_idx < m && A_col_idx + vector_unit_idx < k) ? A[A_row_idx * k + A_col_idx + vector_unit_idx] : static_cast<T>(0)};
+            //         T const val_single{(A_row_idx < m && A_col_idx +
+            //         vector_unit_idx < k) ? A[A_row_idx * k + A_col_idx +
+            //         vector_unit_idx] : static_cast<T>(0)};
             //         reinterpret_cast<T*>(&val)[vector_unit_idx] = val_single;
             //     }
 
-            //     // T const val{(A_row_idx < m && A_col_idx < k) ? A[A_row_idx * k + A_col_idx] : static_cast<T>(0)};
-            //     // A_thread_block_tile_transposed[A_thread_block_tile_col_idx]
-            //     //                             [A_thread_block_tile_row_idx] = val;
+            //     // T const val{(A_row_idx < m && A_col_idx < k) ? A[A_row_idx
+            //     * k + A_col_idx] : static_cast<T>(0)};
+            //     //
+            //     A_thread_block_tile_transposed[A_thread_block_tile_col_idx]
+            //     //                             [A_thread_block_tile_row_idx]
+            //     = val;
             // }
             // else
             // {
-            //     val = (A_row_idx < m && A_col_idx < k) ? *reinterpret_cast<float4 const*>(&A[A_row_idx * k + A_col_idx]) : float4{0.f, 0.f, 0.f, 0.f};
+            //     val = (A_row_idx < m && A_col_idx < k) ?
+            //     *reinterpret_cast<float4 const*>(&A[A_row_idx * k +
+            //     A_col_idx]) : float4{0.f, 0.f, 0.f, 0.f};
             //     // val = float4{0.f, 0.f, 0.f, 0.f};
-            //     // val = (*reinterpret_cast<float4 const*>(&A[A_row_idx * k + A_col_idx]));
+            //     // val = (*reinterpret_cast<float4 const*>(&A[A_row_idx * k +
+            //     A_col_idx]));
             // }
 
-            float4 const val{*reinterpret_cast<float4 const*>(&A[A_row_idx * k + A_col_idx])};
+            float4 const val{*reinterpret_cast<float4 const*>(
+                &A[A_row_idx * k + A_col_idx])};
 
-            #pragma unroll
-            for (size_t vector_unit_idx{0U}; vector_unit_idx < NUM_VECTOR_UNITS; ++vector_unit_idx)
+#pragma unroll
+            for (size_t vector_unit_idx{0U}; vector_unit_idx < NUM_VECTOR_UNITS;
+                 ++vector_unit_idx)
             {
-                A_thread_block_tile_transposed[A_thread_block_tile_col_idx + vector_unit_idx][A_thread_block_tile_row_idx] = reinterpret_cast<T const*>(&val)[vector_unit_idx];
+                A_thread_block_tile_transposed[A_thread_block_tile_col_idx +
+                                               vector_unit_idx]
+                                              [A_thread_block_tile_row_idx] =
+                                                  reinterpret_cast<T const*>(
+                                                      &val)[vector_unit_idx];
             }
         }
-        // Load data from B on DRAM to B_thread_block_tile on shared memory.
-        #pragma unroll
+// Load data from B on DRAM to B_thread_block_tile on shared memory.
+#pragma unroll
         for (size_t load_idx{0U};
-             load_idx < BLOCK_TILE_SIZE_K * BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS / num_threads;
+             load_idx < BLOCK_TILE_SIZE_K * BLOCK_TILE_SIZE_X /
+                            NUM_VECTOR_UNITS / num_threads;
              ++load_idx)
         {
             size_t const B_thread_block_tile_row_idx{
-                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) / (BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS)};
+                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) /
+                (BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS)};
             size_t const B_thread_block_tile_col_idx{
-                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) % (BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS) * NUM_VECTOR_UNITS};
+                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) %
+                (BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS) * NUM_VECTOR_UNITS};
             size_t const B_row_idx{thread_block_tile_idx * BLOCK_TILE_SIZE_K +
                                    B_thread_block_tile_row_idx};
             size_t const B_col_idx{blockIdx.x * BLOCK_TILE_SIZE_X +
                                    B_thread_block_tile_col_idx};
             // This boundary checking might slow down the kernel to some extent.
-            // That's why some specific data formats are beneficial for CUDA kernels.
-            // float4 const val{(B_row_idx < k && B_col_idx < n) ? *reinterpret_cast<float4 const*>(&B[B_row_idx * n + B_col_idx]) : float4{0.f, 0.f, 0.f, 0.f}};
+            // That's why some specific data formats are beneficial for CUDA
+            // kernels. float4 const val{(B_row_idx < k && B_col_idx < n) ?
+            // *reinterpret_cast<float4 const*>(&B[B_row_idx * n + B_col_idx]) :
+            // float4{0.f, 0.f, 0.f, 0.f}};
             // *reinterpret_cast<float4*>(&B_thread_block_tile[B_thread_block_tile_row_idx]
             //                    [B_thread_block_tile_col_idx]) = val;
 
             // float4 val{0.f, 0.f, 0.f, 0.f};
-            // if ((n - B_col_idx) / NUM_VECTOR_UNITS == 0U && (n - B_col_idx) % NUM_VECTOR_UNITS != 0U)
+            // if ((n - B_col_idx) / NUM_VECTOR_UNITS == 0U && (n - B_col_idx) %
+            // NUM_VECTOR_UNITS != 0U)
             // {
             //     size_t const num_remains{(n - B_col_idx) % NUM_VECTOR_UNITS};
-            //     for (size_t vector_unit_idx{0U}; vector_unit_idx < num_remains; ++vector_unit_idx)
+            //     for (size_t vector_unit_idx{0U}; vector_unit_idx <
+            //     num_remains; ++vector_unit_idx)
             //     {
-            //         T const val_single{(B_row_idx < k && B_col_idx + vector_unit_idx < n) ? B[B_row_idx * n + B_col_idx + vector_unit_idx] : static_cast<T>(0)};
+            //         T const val_single{(B_row_idx < k && B_col_idx +
+            //         vector_unit_idx < n) ? B[B_row_idx * n + B_col_idx +
+            //         vector_unit_idx] : static_cast<T>(0)};
             //         reinterpret_cast<T*>(&val)[vector_unit_idx] = val_single;
             //     }
-            //     // T const val{(A_row_idx < m && A_col_idx < k) ? A[A_row_idx * k + A_col_idx] : static_cast<T>(0)};
-            //     // A_thread_block_tile_transposed[A_thread_block_tile_col_idx]
-            //     //                             [A_thread_block_tile_row_idx] = val;
+            //     // T const val{(A_row_idx < m && A_col_idx < k) ? A[A_row_idx
+            //     * k + A_col_idx] : static_cast<T>(0)};
+            //     //
+            //     A_thread_block_tile_transposed[A_thread_block_tile_col_idx]
+            //     //                             [A_thread_block_tile_row_idx]
+            //     = val;
             // }
             // else
             // {
-            //     val = (B_row_idx < k && B_col_idx < n) ? *reinterpret_cast<float4 const*>(&B[B_row_idx * n + B_col_idx]) : float4{0.f, 0.f, 0.f, 0.f};
+            //     val = (B_row_idx < k && B_col_idx < n) ?
+            //     *reinterpret_cast<float4 const*>(&B[B_row_idx * n +
+            //     B_col_idx]) : float4{0.f, 0.f, 0.f, 0.f};
             // }
 
-            float4 const val{*reinterpret_cast<float4 const*>(&B[B_row_idx * n + B_col_idx])};
-            *reinterpret_cast<float4*>(&B_thread_block_tile[B_thread_block_tile_row_idx]
-                               [B_thread_block_tile_col_idx]) = val;
+            float4 const val{*reinterpret_cast<float4 const*>(
+                &B[B_row_idx * n + B_col_idx])};
+            *reinterpret_cast<float4*>(
+                &B_thread_block_tile[B_thread_block_tile_row_idx]
+                                    [B_thread_block_tile_col_idx]) = val;
         }
         __syncthreads();
 
-        // Perform A[:, thread_block_tile_idx:BLOCK_TILE_SIZE_K] *
-        // B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] where A[:,
-        // thread_block_tile_idx:BLOCK_TILE_SIZE_K] and
-        // B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] are cached in the
-        // shared memory as A_thread_block_tile and B_thread_block_tile,
-        // respectively. This inner product is further decomposed to
-        // BLOCK_TILE_SIZE_K outer products. A_thread_block_tile *
-        // B_thread_block_tile = \sigma_{k_i=0}^{BLOCK_TILE_SIZE_K-1}
-        // A_thread_block_tile[:, k_i] @ B_thread_block_tile[k_i, :] Note that
-        // both A_thread_block_tile and B_thread_block_tile can be cached in the
-        // register.
-        // Can use pragma unroll to unroll these static loops to see if there is a performance gain.
-        #pragma unroll
+// Perform A[:, thread_block_tile_idx:BLOCK_TILE_SIZE_K] *
+// B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] where A[:,
+// thread_block_tile_idx:BLOCK_TILE_SIZE_K] and
+// B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] are cached in the
+// shared memory as A_thread_block_tile and B_thread_block_tile,
+// respectively. This inner product is further decomposed to
+// BLOCK_TILE_SIZE_K outer products. A_thread_block_tile *
+// B_thread_block_tile = \sigma_{k_i=0}^{BLOCK_TILE_SIZE_K-1}
+// A_thread_block_tile[:, k_i] @ B_thread_block_tile[k_i, :] Note that
+// both A_thread_block_tile and B_thread_block_tile can be cached in the
+// register.
+// Can use pragma unroll to unroll these static loops to see if there is a
+// performance gain.
+#pragma unroll
         for (size_t k_i{0U}; k_i < BLOCK_TILE_SIZE_K; ++k_i)
         {
-            #pragma unroll
-            for (size_t thread_tile_row_idx{0U}; thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y; ++thread_tile_row_idx)
+#pragma unroll
+            for (size_t thread_tile_row_idx{0U};
+                 thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y;
+                 ++thread_tile_row_idx)
             {
-                size_t const A_thread_block_tile_row_idx{warp_row_idx * WARP_FRAGMENT_SIZE_Y + thread_tile_row_idx * (WARP_FRAGMENT_SIZE_Y / NUM_THREAD_TILES_PER_WARP_Y) + thread_linear_row_idx_in_warp * THREAD_FRAGMENT_SIZE_Y};
+                size_t const A_thread_block_tile_row_idx{
+                    warp_row_idx * WARP_FRAGMENT_SIZE_Y +
+                    thread_tile_row_idx *
+                        (WARP_FRAGMENT_SIZE_Y / NUM_THREAD_TILES_PER_WARP_Y) +
+                    thread_linear_row_idx_in_warp * THREAD_FRAGMENT_SIZE_Y};
                 size_t const A_thread_block_tile_col_idx{k_i};
-                #pragma unroll
-                for (size_t thread_fragment_y_idx{0U}; thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y / NUM_VECTOR_UNITS; ++thread_fragment_y_idx)
+#pragma unroll
+                for (size_t thread_fragment_y_idx{0U};
+                     thread_fragment_y_idx <
+                     THREAD_FRAGMENT_SIZE_Y / NUM_VECTOR_UNITS;
+                     ++thread_fragment_y_idx)
                 {
-                    *reinterpret_cast<float4*>(&A_vals[thread_tile_row_idx][thread_fragment_y_idx * NUM_VECTOR_UNITS]) = *reinterpret_cast<float4 const*>(&A_thread_block_tile_transposed[A_thread_block_tile_col_idx][A_thread_block_tile_row_idx + thread_fragment_y_idx * NUM_VECTOR_UNITS]);
+                    *reinterpret_cast<float4*>(
+                        &A_vals[thread_tile_row_idx]
+                               [thread_fragment_y_idx * NUM_VECTOR_UNITS]) =
+                        *reinterpret_cast<float4 const*>(
+                            &A_thread_block_tile_transposed
+                                [A_thread_block_tile_col_idx]
+                                [A_thread_block_tile_row_idx +
+                                 thread_fragment_y_idx * NUM_VECTOR_UNITS]);
                 }
             }
-            #pragma unroll
-            for (size_t thread_tile_col_idx{0U}; thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X; ++thread_tile_col_idx)
+#pragma unroll
+            for (size_t thread_tile_col_idx{0U};
+                 thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X;
+                 ++thread_tile_col_idx)
             {
                 size_t const B_thread_block_tile_row_idx{k_i};
-                size_t const B_thread_block_tile_col_idx{warp_col_idx * WARP_FRAGMENT_SIZE_X + thread_tile_col_idx * (WARP_FRAGMENT_SIZE_X / NUM_THREAD_TILES_PER_WARP_X) + thread_linear_col_idx_in_warp * THREAD_FRAGMENT_SIZE_X};
-                #pragma unroll
-                for (size_t thread_fragment_x_idx{0U}; thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X / NUM_VECTOR_UNITS; ++thread_fragment_x_idx)
+                size_t const B_thread_block_tile_col_idx{
+                    warp_col_idx * WARP_FRAGMENT_SIZE_X +
+                    thread_tile_col_idx *
+                        (WARP_FRAGMENT_SIZE_X / NUM_THREAD_TILES_PER_WARP_X) +
+                    thread_linear_col_idx_in_warp * THREAD_FRAGMENT_SIZE_X};
+#pragma unroll
+                for (size_t thread_fragment_x_idx{0U};
+                     thread_fragment_x_idx <
+                     THREAD_FRAGMENT_SIZE_X / NUM_VECTOR_UNITS;
+                     ++thread_fragment_x_idx)
                 {
-                    *reinterpret_cast<float4*>(&B_vals[thread_tile_col_idx][thread_fragment_x_idx * NUM_VECTOR_UNITS]) = *reinterpret_cast<float4 const*>(&B_thread_block_tile[B_thread_block_tile_row_idx][B_thread_block_tile_col_idx + thread_fragment_x_idx * NUM_VECTOR_UNITS]);
+                    *reinterpret_cast<float4*>(
+                        &B_vals[thread_tile_col_idx]
+                               [thread_fragment_x_idx * NUM_VECTOR_UNITS]) =
+                        *reinterpret_cast<float4 const*>(
+                            &B_thread_block_tile[B_thread_block_tile_row_idx]
+                                                [B_thread_block_tile_col_idx +
+                                                 thread_fragment_x_idx *
+                                                     NUM_VECTOR_UNITS]);
                 }
             }
 
-            // Compute NUM_THREAD_TILES_PER_WARP_Y * NUM_THREAD_TILES_PER_WARP_X outer products.
-            #pragma unroll
-            for (size_t thread_tile_row_idx{0U}; thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y; ++thread_tile_row_idx)
+// Compute NUM_THREAD_TILES_PER_WARP_Y * NUM_THREAD_TILES_PER_WARP_X outer
+// products.
+#pragma unroll
+            for (size_t thread_tile_row_idx{0U};
+                 thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y;
+                 ++thread_tile_row_idx)
             {
-                #pragma unroll
-                for (size_t thread_tile_col_idx{0U}; thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X; ++thread_tile_col_idx)
+#pragma unroll
+                for (size_t thread_tile_col_idx{0U};
+                     thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X;
+                     ++thread_tile_col_idx)
                 {
-                    #pragma unroll
-                    for (size_t thread_fragment_y_idx{0U}; thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y; ++thread_fragment_y_idx)
+#pragma unroll
+                    for (size_t thread_fragment_y_idx{0U};
+                         thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y;
+                         ++thread_fragment_y_idx)
                     {
-                        #pragma unroll
-                        for (size_t thread_fragment_x_idx{0U}; thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X; ++thread_fragment_x_idx)
+#pragma unroll
+                        for (size_t thread_fragment_x_idx{0U};
+                             thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X;
+                             ++thread_fragment_x_idx)
                         {
-                            C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx] += A_vals[thread_tile_row_idx][thread_fragment_y_idx] * B_vals[thread_tile_col_idx][thread_fragment_x_idx];
+                            C_thread_results[thread_tile_row_idx]
+                                            [thread_tile_col_idx]
+                                            [thread_fragment_y_idx]
+                                            [thread_fragment_x_idx] +=
+                                A_vals[thread_tile_row_idx]
+                                      [thread_fragment_y_idx] *
+                                B_vals[thread_tile_col_idx]
+                                      [thread_fragment_x_idx];
                         }
                     }
                 }
@@ -1904,89 +2123,159 @@ __global__ void gemm_v9(size_t m, size_t n, size_t k, float alpha, T const* A, T
     // Need a synchronization before writing the results to DRAM.
     __syncthreads();
 
-    // Write the results to DRAM.
-    #pragma unroll
-    for (size_t thread_tile_row_idx{0U}; thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y; ++thread_tile_row_idx)
+// Write the results to DRAM.
+#pragma unroll
+    for (size_t thread_tile_row_idx{0U};
+         thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y;
+         ++thread_tile_row_idx)
     {
-        #pragma unroll
-        for (size_t thread_tile_col_idx{0U}; thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X; ++thread_tile_col_idx)
+#pragma unroll
+        for (size_t thread_tile_col_idx{0U};
+             thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X;
+             ++thread_tile_col_idx)
         {
-            #pragma unroll
-            for (size_t thread_fragment_y_idx{0U}; thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y; ++thread_fragment_y_idx)
+#pragma unroll
+            for (size_t thread_fragment_y_idx{0U};
+                 thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y;
+                 ++thread_fragment_y_idx)
             {
-                #pragma unroll
-                for (size_t thread_fragment_x_idx{0U}; thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X / NUM_VECTOR_UNITS; ++thread_fragment_x_idx)
+#pragma unroll
+                for (size_t thread_fragment_x_idx{0U};
+                     thread_fragment_x_idx <
+                     THREAD_FRAGMENT_SIZE_X / NUM_VECTOR_UNITS;
+                     ++thread_fragment_x_idx)
                 {
-                    size_t const C_row_idx{blockIdx.y * BLOCK_TILE_SIZE_Y + warp_row_idx * WARP_FRAGMENT_SIZE_Y + thread_tile_row_idx * (WARP_FRAGMENT_SIZE_Y / NUM_THREAD_TILES_PER_WARP_Y) + thread_linear_row_idx_in_warp * THREAD_FRAGMENT_SIZE_Y + thread_fragment_y_idx};
-                    size_t const C_col_idx{blockIdx.x * BLOCK_TILE_SIZE_X + warp_col_idx * WARP_FRAGMENT_SIZE_X + thread_tile_col_idx * (WARP_FRAGMENT_SIZE_X / NUM_THREAD_TILES_PER_WARP_X) + thread_linear_col_idx_in_warp * THREAD_FRAGMENT_SIZE_X + thread_fragment_x_idx * NUM_VECTOR_UNITS};
+                    size_t const C_row_idx{
+                        blockIdx.y * BLOCK_TILE_SIZE_Y +
+                        warp_row_idx * WARP_FRAGMENT_SIZE_Y +
+                        thread_tile_row_idx * (WARP_FRAGMENT_SIZE_Y /
+                                               NUM_THREAD_TILES_PER_WARP_Y) +
+                        thread_linear_row_idx_in_warp * THREAD_FRAGMENT_SIZE_Y +
+                        thread_fragment_y_idx};
+                    size_t const C_col_idx{
+                        blockIdx.x * BLOCK_TILE_SIZE_X +
+                        warp_col_idx * WARP_FRAGMENT_SIZE_X +
+                        thread_tile_col_idx * (WARP_FRAGMENT_SIZE_X /
+                                               NUM_THREAD_TILES_PER_WARP_X) +
+                        thread_linear_col_idx_in_warp * THREAD_FRAGMENT_SIZE_X +
+                        thread_fragment_x_idx * NUM_VECTOR_UNITS};
 
-                    float4 C_vals{*reinterpret_cast<float4*>(&C[C_row_idx * n + C_col_idx])};
-                    #pragma unroll
-                    for (size_t vector_unit_idx{0U}; vector_unit_idx < NUM_VECTOR_UNITS; ++vector_unit_idx)
+                    float4 C_vals{*reinterpret_cast<float4*>(
+                        &C[C_row_idx * n + C_col_idx])};
+#pragma unroll
+                    for (size_t vector_unit_idx{0U};
+                         vector_unit_idx < NUM_VECTOR_UNITS; ++vector_unit_idx)
                     {
-                        reinterpret_cast<T*>(&C_vals)[vector_unit_idx] = alpha * C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx * NUM_VECTOR_UNITS + vector_unit_idx] + beta * reinterpret_cast<T*>(&C_vals)[vector_unit_idx];
-                        // reinterpret_cast<T*>(&C_vals)[vector_unit_idx] = C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx * NUM_VECTOR_UNITS + vector_unit_idx] + reinterpret_cast<T*>(&C_vals)[vector_unit_idx];
+                        reinterpret_cast<T*>(&C_vals)[vector_unit_idx] =
+                            alpha * C_thread_results[thread_tile_row_idx]
+                                                    [thread_tile_col_idx]
+                                                    [thread_fragment_y_idx]
+                                                    [thread_fragment_x_idx *
+                                                         NUM_VECTOR_UNITS +
+                                                     vector_unit_idx] +
+                            beta *
+                                reinterpret_cast<T*>(&C_vals)[vector_unit_idx];
+                        // reinterpret_cast<T*>(&C_vals)[vector_unit_idx] =
+                        // C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx
+                        // * NUM_VECTOR_UNITS + vector_unit_idx] +
+                        // reinterpret_cast<T*>(&C_vals)[vector_unit_idx];
                     }
-                    *reinterpret_cast<float4*>(&C[C_row_idx * n + C_col_idx]) = C_vals;
+                    *reinterpret_cast<float4*>(&C[C_row_idx * n + C_col_idx]) =
+                        C_vals;
 
                     // if (C_row_idx < m && C_col_idx < n)
                     // {
 
-                    //     // if ((n - C_col_idx) / NUM_VECTOR_UNITS == 0U && (n - C_col_idx) % NUM_VECTOR_UNITS != 0U)
+                    //     // if ((n - C_col_idx) / NUM_VECTOR_UNITS == 0U && (n
+                    //     - C_col_idx) % NUM_VECTOR_UNITS != 0U)
                     //     // {
-                    //     //     size_t const num_remains{(n - C_col_idx) % NUM_VECTOR_UNITS};
-                    //     //     for (size_t vector_unit_idx{0U}; vector_unit_idx < num_remains; ++vector_unit_idx)
+                    //     //     size_t const num_remains{(n - C_col_idx) %
+                    //     NUM_VECTOR_UNITS};
+                    //     //     for (size_t vector_unit_idx{0U};
+                    //     vector_unit_idx < num_remains; ++vector_unit_idx)
                     //     //     {
-                    //     //         C[C_row_idx * n + C_col_idx] = alpha * C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx + vector_unit_idx] + beta * C[C_row_idx * n + C_col_idx];
+                    //     //         C[C_row_idx * n + C_col_idx] = alpha *
+                    //     C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx
+                    //     + vector_unit_idx] + beta * C[C_row_idx * n +
+                    //     C_col_idx];
                     //     //     }
                     //     // }
                     //     // else
                     //     // {
-                    //     //     float4 C_vals{*reinterpret_cast<float4*>(&C[C_row_idx * n + C_col_idx])};
+                    //     //     float4
+                    //     C_vals{*reinterpret_cast<float4*>(&C[C_row_idx * n +
+                    //     C_col_idx])};
                     //     //     #pragma unroll
-                    //     //     for (size_t vector_unit_idx{0U}; vector_unit_idx < NUM_VECTOR_UNITS; ++vector_unit_idx)
+                    //     //     for (size_t vector_unit_idx{0U};
+                    //     vector_unit_idx < NUM_VECTOR_UNITS;
+                    //     ++vector_unit_idx)
                     //     //     {
-                    //     //         reinterpret_cast<T*>(&C_vals)[vector_unit_idx] = alpha * C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx + vector_unit_idx] + beta * reinterpret_cast<T*>(&C_vals)[vector_unit_idx];
+                    //     // reinterpret_cast<T*>(&C_vals)[vector_unit_idx] =
+                    //     alpha *
+                    //     C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx
+                    //     + vector_unit_idx] + beta *
+                    //     reinterpret_cast<T*>(&C_vals)[vector_unit_idx];
                     //     //     }
-                    //     //     *reinterpret_cast<float4*>(&C[C_row_idx * n + C_col_idx]) = C_vals;
+                    //     //     *reinterpret_cast<float4*>(&C[C_row_idx * n +
+                    //     C_col_idx]) = C_vals;
                     //     // }
 
-
-                    //     float4 C_vals{*reinterpret_cast<float4*>(&C[C_row_idx * n + C_col_idx])};
-                    //     #pragma unroll
-                    //     for (size_t vector_unit_idx{0U}; vector_unit_idx < NUM_VECTOR_UNITS; ++vector_unit_idx)
+                    //     float4 C_vals{*reinterpret_cast<float4*>(&C[C_row_idx
+                    //     * n + C_col_idx])}; #pragma unroll for (size_t
+                    //     vector_unit_idx{0U}; vector_unit_idx <
+                    //     NUM_VECTOR_UNITS; ++vector_unit_idx)
                     //     {
-                    //         reinterpret_cast<T*>(&C_vals)[vector_unit_idx] = alpha * C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx + vector_unit_idx] + beta * reinterpret_cast<T*>(&C_vals)[vector_unit_idx];
+                    //         reinterpret_cast<T*>(&C_vals)[vector_unit_idx] =
+                    //         alpha *
+                    //         C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx
+                    //         + vector_unit_idx] + beta *
+                    //         reinterpret_cast<T*>(&C_vals)[vector_unit_idx];
                     //     }
-                    //     *reinterpret_cast<float4*>(&C[C_row_idx * n + C_col_idx]) = C_vals;
+                    //     *reinterpret_cast<float4*>(&C[C_row_idx * n +
+                    //     C_col_idx]) = C_vals;
 
-
-
-                    //     // float4 C_vals{*reinterpret_cast<float4 const*>(&C[C_row_idx * n + C_col_idx])};
+                    //     // float4 C_vals{*reinterpret_cast<float4
+                    //     const*>(&C[C_row_idx * n + C_col_idx])};
 
                     //     // #pragma unroll
-                    //     // for (size_t vector_unit_idx{0U}; vector_unit_idx < NUM_VECTOR_UNITS; ++vector_unit_idx)
+                    //     // for (size_t vector_unit_idx{0U}; vector_unit_idx <
+                    //     NUM_VECTOR_UNITS; ++vector_unit_idx)
                     //     // {
-                    //     //     reinterpret_cast<T*>(&C_vals)[vector_unit_idx] = alpha * C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx + vector_unit_idx] + beta * reinterpret_cast<T const*>(&C_vals)[vector_unit_idx];
+                    //     //     reinterpret_cast<T*>(&C_vals)[vector_unit_idx]
+                    //     = alpha *
+                    //     C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx
+                    //     + vector_unit_idx] + beta * reinterpret_cast<T
+                    //     const*>(&C_vals)[vector_unit_idx];
                     //     // }
 
-                    //     // if ((n - C_col_idx) / NUM_VECTOR_UNITS == 0U && (n - C_col_idx) % NUM_VECTOR_UNITS != 0U)
+                    //     // if ((n - C_col_idx) / NUM_VECTOR_UNITS == 0U && (n
+                    //     - C_col_idx) % NUM_VECTOR_UNITS != 0U)
                     //     // {
-                    //     //     size_t const num_remains{(n - C_col_idx) % NUM_VECTOR_UNITS};
-                    //     //     for (size_t vector_unit_idx{0U}; vector_unit_idx < num_remains; ++vector_unit_idx)
+                    //     //     size_t const num_remains{(n - C_col_idx) %
+                    //     NUM_VECTOR_UNITS};
+                    //     //     for (size_t vector_unit_idx{0U};
+                    //     vector_unit_idx < num_remains; ++vector_unit_idx)
                     //     //     {
-                    //     //         // T const val_single{(B_row_idx < k && B_col_idx + vector_unit_idx < n) ? B[B_row_idx * n + B_col_idx + vector_unit_idx] : static_cast<T>(0)};
-                    //     //         // reinterpret_cast<T*>(&val)[vector_unit_idx] = val_single;
+                    //     //         // T const val_single{(B_row_idx < k &&
+                    //     B_col_idx + vector_unit_idx < n) ? B[B_row_idx * n +
+                    //     B_col_idx + vector_unit_idx] : static_cast<T>(0)};
+                    //     //         //
+                    //     reinterpret_cast<T*>(&val)[vector_unit_idx] =
+                    //     val_single;
 
-                    //     //         C[C_row_idx * n + C_col_idx + vector_unit_idx] = reinterpret_cast<T const*>(&C_vals)[vector_unit_idx];
+                    //     //         C[C_row_idx * n + C_col_idx +
+                    //     vector_unit_idx] = reinterpret_cast<T
+                    //     const*>(&C_vals)[vector_unit_idx];
                     //     //     }
                     //     // }
                     //     // else
                     //     // {
-                    //     //     *reinterpret_cast<float4*>(&C[C_row_idx * n + C_col_idx]) = C_vals;
+                    //     //     *reinterpret_cast<float4*>(&C[C_row_idx * n +
+                    //     C_col_idx]) = C_vals;
                     //     // }
 
-                    //     // *reinterpret_cast<float4*>(&C[C_row_idx * n + C_col_idx]) = C_vals;
+                    //     // *reinterpret_cast<float4*>(&C[C_row_idx * n +
+                    //     C_col_idx]) = C_vals;
 
                     // }
                 }
@@ -1994,7 +2283,6 @@ __global__ void gemm_v9(size_t m, size_t n, size_t k, float alpha, T const* A, T
         }
     }
 }
-
 
 template <typename T>
 void launch_gemm_kernel_v9(size_t m, size_t n, size_t k, float alpha,
@@ -2013,8 +2301,10 @@ void launch_gemm_kernel_v9(size_t m, size_t n, size_t k, float alpha,
     constexpr unsigned int WARP_FRAGMENT_SIZE_X{32U};
     constexpr unsigned int WARP_FRAGMENT_SIZE_Y{64U};
 
-    constexpr unsigned int NUM_WARPS_X{BLOCK_TILE_SIZE_X / WARP_FRAGMENT_SIZE_X};
-    constexpr unsigned int NUM_WARPS_Y{BLOCK_TILE_SIZE_Y / WARP_FRAGMENT_SIZE_Y};
+    constexpr unsigned int NUM_WARPS_X{BLOCK_TILE_SIZE_X /
+                                       WARP_FRAGMENT_SIZE_X};
+    constexpr unsigned int NUM_WARPS_Y{BLOCK_TILE_SIZE_Y /
+                                       WARP_FRAGMENT_SIZE_Y};
     static_assert(BLOCK_TILE_SIZE_X % WARP_FRAGMENT_SIZE_X == 0U);
     static_assert(BLOCK_TILE_SIZE_Y % WARP_FRAGMENT_SIZE_Y == 0U);
 
@@ -2023,7 +2313,6 @@ void launch_gemm_kernel_v9(size_t m, size_t n, size_t k, float alpha,
     // 4, 4 slightly better than 8, 8
     // constexpr unsigned int THREAD_FRAGMENT_SIZE_X{8U};
     // constexpr unsigned int THREAD_FRAGMENT_SIZE_Y{8U};
-
 
     // To use float4 for 128bit vectorized memory access.
     constexpr size_t NUM_VECTOR_UNITS{sizeof(float4) / sizeof(T)};
@@ -2037,12 +2326,18 @@ void launch_gemm_kernel_v9(size_t m, size_t n, size_t k, float alpha,
     constexpr unsigned int NUM_THREADS_PER_WARP_Y{8U};
 
     // constexpr unsigned int NUM_THREAD_TILES_PER_WARP_X{WARP_FRAGMENT_SIZE_X /
-    //                                                     (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X)};
+    //                                                     (THREAD_FRAGMENT_SIZE_X
+    //                                                     * NUM_THREADS_PER_WARP_X)};
     // constexpr unsigned int NUM_THREAD_TILES_PER_WARP_Y{WARP_FRAGMENT_SIZE_Y /
-    //                                                     (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y)};
+    //                                                     (THREAD_FRAGMENT_SIZE_Y
+    //                                                     * NUM_THREADS_PER_WARP_Y)};
 
-    static_assert(WARP_FRAGMENT_SIZE_X % (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X) == 0U);
-    static_assert(WARP_FRAGMENT_SIZE_Y % (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y) == 0U);
+    static_assert(WARP_FRAGMENT_SIZE_X %
+                      (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X) ==
+                  0U);
+    static_assert(WARP_FRAGMENT_SIZE_Y %
+                      (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y) ==
+                  0U);
 
     constexpr unsigned int NUM_THREADS_X{NUM_WARPS_X * NUM_THREADS_PER_WARP_X};
     constexpr unsigned int NUM_THREADS_Y{NUM_WARPS_Y * NUM_THREADS_PER_WARP_Y};
@@ -2057,35 +2352,37 @@ void launch_gemm_kernel_v9(size_t m, size_t n, size_t k, float alpha,
         (static_cast<unsigned int>(m) + BLOCK_TILE_SIZE_Y - 1U) /
             BLOCK_TILE_SIZE_Y,
         1U};
-    gemm_v9<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K, WARP_FRAGMENT_SIZE_X, WARP_FRAGMENT_SIZE_Y, THREAD_FRAGMENT_SIZE_X, THREAD_FRAGMENT_SIZE_Y, NUM_THREADS_PER_WARP_X, NUM_THREADS_PER_WARP_Y>
+    gemm_v9<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+            WARP_FRAGMENT_SIZE_X, WARP_FRAGMENT_SIZE_Y, THREAD_FRAGMENT_SIZE_X,
+            THREAD_FRAGMENT_SIZE_Y, NUM_THREADS_PER_WARP_X,
+            NUM_THREADS_PER_WARP_Y>
         <<<grid_dim, block_dim, 0U, stream>>>(m, n, k, alpha, A, B, beta, C);
     CHECK_LAST_CUDA_ERROR();
 }
-
 
 // Play with some FP16 GEMM
 // 2D warp tiling with vectorized data IO
 // Each thread in the block processes BLOCK_FRAGMENT_SIZE_Y *
 // BLOCK_FRAGMENT_SIZE_X output values. Number of threads BLOCK_TILE_SIZE_Y *
 // BLOCK_TILE_SIZE_X / (BLOCK_FRAGMENT_SIZE_Y * BLOCK_FRAGMENT_SIZE_X)
-template <typename T, unsigned int BLOCK_TILE_SIZE_X,
-          unsigned int BLOCK_TILE_SIZE_Y, unsigned int BLOCK_TILE_SIZE_K,
-          unsigned int WARP_FRAGMENT_SIZE_X,
-          unsigned int WARP_FRAGMENT_SIZE_Y,
-          unsigned int THREAD_FRAGMENT_SIZE_X,
-          unsigned int THREAD_FRAGMENT_SIZE_Y,
-          unsigned int NUM_THREADS_PER_WARP_X,
-          unsigned int NUM_THREADS_PER_WARP_Y>
-__global__ void gemm_v10(size_t m, size_t n, size_t k, float alpha, T const* A, T const* B,
-            float beta, T* C)
+template <
+    typename T, unsigned int BLOCK_TILE_SIZE_X, unsigned int BLOCK_TILE_SIZE_Y,
+    unsigned int BLOCK_TILE_SIZE_K, unsigned int WARP_FRAGMENT_SIZE_X,
+    unsigned int WARP_FRAGMENT_SIZE_Y, unsigned int THREAD_FRAGMENT_SIZE_X,
+    unsigned int THREAD_FRAGMENT_SIZE_Y, unsigned int NUM_THREADS_PER_WARP_X,
+    unsigned int NUM_THREADS_PER_WARP_Y>
+__global__ void gemm_v10(size_t m, size_t n, size_t k, float alpha, T const* A,
+                         T const* B, float beta, T* C)
 {
     static_assert(NUM_THREADS_PER_WARP_X * NUM_THREADS_PER_WARP_Y == 32U);
     constexpr size_t NUM_WARPS_X{BLOCK_TILE_SIZE_X / WARP_FRAGMENT_SIZE_X};
     constexpr size_t NUM_WARPS_Y{BLOCK_TILE_SIZE_Y / WARP_FRAGMENT_SIZE_Y};
-    constexpr unsigned int NUM_THREAD_TILES_PER_WARP_X{WARP_FRAGMENT_SIZE_X /
-                                                        (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X)};
-    constexpr unsigned int NUM_THREAD_TILES_PER_WARP_Y{WARP_FRAGMENT_SIZE_Y /
-                                                        (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y)};
+    constexpr unsigned int NUM_THREAD_TILES_PER_WARP_X{
+        WARP_FRAGMENT_SIZE_X /
+        (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X)};
+    constexpr unsigned int NUM_THREAD_TILES_PER_WARP_Y{
+        WARP_FRAGMENT_SIZE_Y /
+        (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y)};
 
     constexpr unsigned int NUM_THREADS_X{NUM_WARPS_X * NUM_THREADS_PER_WARP_X};
     constexpr unsigned int NUM_THREADS_Y{NUM_WARPS_Y * NUM_THREADS_PER_WARP_Y};
@@ -2100,9 +2397,11 @@ __global__ void gemm_v10(size_t m, size_t n, size_t k, float alpha, T const* A, 
     __shared__ T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X];
 
     // B_vals is cached in the register.
-    T B_vals[NUM_THREAD_TILES_PER_WARP_X][THREAD_FRAGMENT_SIZE_X] = {static_cast<T>(0)};
+    T B_vals[NUM_THREAD_TILES_PER_WARP_X][THREAD_FRAGMENT_SIZE_X] = {
+        static_cast<T>(0)};
     // A_vals is cached in the register.
-    T A_vals[NUM_THREAD_TILES_PER_WARP_Y][THREAD_FRAGMENT_SIZE_Y] = {static_cast<T>(0)};
+    T A_vals[NUM_THREAD_TILES_PER_WARP_Y][THREAD_FRAGMENT_SIZE_Y] = {
+        static_cast<T>(0)};
 
     // size_t const num_threads{blockDim.x};
     constexpr size_t num_threads{NUM_THREADS_PER_BLOCK};
@@ -2111,8 +2410,10 @@ __global__ void gemm_v10(size_t m, size_t n, size_t k, float alpha, T const* A, 
     size_t const warp_row_idx{warp_linear_idx / NUM_WARPS_X};
     size_t const warp_col_idx{warp_linear_idx % NUM_WARPS_X};
     size_t const thread_linear_idx_in_warp{threadIdx.x % 32U};
-    size_t const thread_linear_row_idx_in_warp{thread_linear_idx_in_warp / NUM_THREADS_PER_WARP_X};
-    size_t const thread_linear_col_idx_in_warp{thread_linear_idx_in_warp % NUM_THREADS_PER_WARP_X};
+    size_t const thread_linear_row_idx_in_warp{thread_linear_idx_in_warp /
+                                               NUM_THREADS_PER_WARP_X};
+    size_t const thread_linear_col_idx_in_warp{thread_linear_idx_in_warp %
+                                               NUM_THREADS_PER_WARP_X};
 
     // Number of outer loops to perform the sum of inner products.
     // C_thread_block_tile =
@@ -2121,27 +2422,37 @@ __global__ void gemm_v10(size_t m, size_t n, size_t k, float alpha, T const* A, 
     // B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :]
     size_t const num_thread_block_tiles{(k + BLOCK_TILE_SIZE_K - 1U) /
                                         BLOCK_TILE_SIZE_K};
-    // Each thread in the block processes NUM_THREAD_TILES_PER_WARP_Y * NUM_THREAD_TILES_PER_WARP_X * THREAD_FRAGMENT_SIZE_Y * THREAD_FRAGMENT_SIZE_X output values.
-    // Specifically, these values corresponds to
-    // 
-    T C_thread_results[NUM_THREAD_TILES_PER_WARP_Y][NUM_THREAD_TILES_PER_WARP_X][THREAD_FRAGMENT_SIZE_Y][THREAD_FRAGMENT_SIZE_X] = {
-        static_cast<T>(0)};
+    // Each thread in the block processes NUM_THREAD_TILES_PER_WARP_Y *
+    // NUM_THREAD_TILES_PER_WARP_X * THREAD_FRAGMENT_SIZE_Y *
+    // THREAD_FRAGMENT_SIZE_X output values. Specifically, these values
+    // corresponds to
+    //
+    T C_thread_results[NUM_THREAD_TILES_PER_WARP_Y][NUM_THREAD_TILES_PER_WARP_X]
+                      [THREAD_FRAGMENT_SIZE_Y][THREAD_FRAGMENT_SIZE_X] = {
+                          static_cast<T>(0)};
 
     for (size_t thread_block_tile_idx{0U};
          thread_block_tile_idx < num_thread_block_tiles;
          ++thread_block_tile_idx)
     {
-        // Question / TODO: Can this load function be a warp based function?
-        // Load data from A on DRAM to A_thread_block_tile on shared memory.
-        #pragma unroll
+// Question / TODO: Can this load function be a warp based function?
+// Load data from A on DRAM to A_thread_block_tile on shared memory.
+#pragma unroll
         for (size_t load_idx{0U};
-             load_idx < BLOCK_TILE_SIZE_Y * BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS / num_threads; // Using NUM_THREADS_PER_BLOCK instead of num_threads results in larger numerical error. Crazy ?!
+             load_idx < BLOCK_TILE_SIZE_Y * BLOCK_TILE_SIZE_K /
+                            NUM_VECTOR_UNITS /
+                            num_threads; // Using NUM_THREADS_PER_BLOCK instead
+                                         // of num_threads results in larger
+                                         // numerical error. Crazy ?!
              ++load_idx)
         {
             size_t const A_thread_block_tile_row_idx{
-                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) / (BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS)};
+                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) /
+                (BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS)};
             size_t const A_thread_block_tile_col_idx{
-                ((threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) % (BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS)) * NUM_VECTOR_UNITS};
+                ((threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) %
+                 (BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS)) *
+                NUM_VECTOR_UNITS};
             size_t const A_row_idx{blockIdx.y * BLOCK_TILE_SIZE_Y +
                                    A_thread_block_tile_row_idx};
             size_t const A_col_idx{thread_block_tile_idx * BLOCK_TILE_SIZE_K +
@@ -2149,134 +2460,217 @@ __global__ void gemm_v10(size_t m, size_t n, size_t k, float alpha, T const* A, 
             // A_thread_block_tile[A_thread_block_tile_row_idx][A_thread_block_tile_col_idx]
             // = A[A_row_idx * k + A_col_idx];
             // This boundary checking might slow down the kernel to some extent.
-            // That's why some specific data formats are beneficial for CUDA kernels.
-            // float4 const val{(A_row_idx < m && A_col_idx < k) ? *reinterpret_cast<float4 const*>(&A[A_row_idx * k + A_col_idx]) : float4{0.f, 0.f, 0.f, 0.f}};
+            // That's why some specific data formats are beneficial for CUDA
+            // kernels. float4 const val{(A_row_idx < m && A_col_idx < k) ?
+            // *reinterpret_cast<float4 const*>(&A[A_row_idx * k + A_col_idx]) :
+            // float4{0.f, 0.f, 0.f, 0.f}};
 
             // float4 val{0.f, 0.f, 0.f, 0.f};
-            // if ((k - A_col_idx) / NUM_VECTOR_UNITS == 0U && (k - A_col_idx) % NUM_VECTOR_UNITS != 0U)
+            // if ((k - A_col_idx) / NUM_VECTOR_UNITS == 0U && (k - A_col_idx) %
+            // NUM_VECTOR_UNITS != 0U)
             // {
             //     size_t const num_remains{(k - A_col_idx) % NUM_VECTOR_UNITS};
-            //     for (size_t vector_unit_idx{0U}; vector_unit_idx < num_remains; ++vector_unit_idx)
+            //     for (size_t vector_unit_idx{0U}; vector_unit_idx <
+            //     num_remains; ++vector_unit_idx)
             //     {
-            //         T const val_single{(A_row_idx < m && A_col_idx + vector_unit_idx < k) ? A[A_row_idx * k + A_col_idx + vector_unit_idx] : static_cast<T>(0)};
+            //         T const val_single{(A_row_idx < m && A_col_idx +
+            //         vector_unit_idx < k) ? A[A_row_idx * k + A_col_idx +
+            //         vector_unit_idx] : static_cast<T>(0)};
             //         reinterpret_cast<T*>(&val)[vector_unit_idx] = val_single;
             //     }
 
-            //     // T const val{(A_row_idx < m && A_col_idx < k) ? A[A_row_idx * k + A_col_idx] : static_cast<T>(0)};
-            //     // A_thread_block_tile_transposed[A_thread_block_tile_col_idx]
-            //     //                             [A_thread_block_tile_row_idx] = val;
+            //     // T const val{(A_row_idx < m && A_col_idx < k) ? A[A_row_idx
+            //     * k + A_col_idx] : static_cast<T>(0)};
+            //     //
+            //     A_thread_block_tile_transposed[A_thread_block_tile_col_idx]
+            //     //                             [A_thread_block_tile_row_idx]
+            //     = val;
             // }
             // else
             // {
-            //     val = (A_row_idx < m && A_col_idx < k) ? *reinterpret_cast<float4 const*>(&A[A_row_idx * k + A_col_idx]) : float4{0.f, 0.f, 0.f, 0.f};
+            //     val = (A_row_idx < m && A_col_idx < k) ?
+            //     *reinterpret_cast<float4 const*>(&A[A_row_idx * k +
+            //     A_col_idx]) : float4{0.f, 0.f, 0.f, 0.f};
             //     // val = float4{0.f, 0.f, 0.f, 0.f};
-            //     // val = (*reinterpret_cast<float4 const*>(&A[A_row_idx * k + A_col_idx]));
+            //     // val = (*reinterpret_cast<float4 const*>(&A[A_row_idx * k +
+            //     A_col_idx]));
             // }
 
-            float4 const val{*reinterpret_cast<float4 const*>(&A[A_row_idx * k + A_col_idx])};
+            float4 const val{*reinterpret_cast<float4 const*>(
+                &A[A_row_idx * k + A_col_idx])};
 
-            #pragma unroll
-            for (size_t vector_unit_idx{0U}; vector_unit_idx < NUM_VECTOR_UNITS; ++vector_unit_idx)
+#pragma unroll
+            for (size_t vector_unit_idx{0U}; vector_unit_idx < NUM_VECTOR_UNITS;
+                 ++vector_unit_idx)
             {
-                A_thread_block_tile_transposed[A_thread_block_tile_col_idx + vector_unit_idx][A_thread_block_tile_row_idx] = reinterpret_cast<T const*>(&val)[vector_unit_idx];
+                A_thread_block_tile_transposed[A_thread_block_tile_col_idx +
+                                               vector_unit_idx]
+                                              [A_thread_block_tile_row_idx] =
+                                                  reinterpret_cast<T const*>(
+                                                      &val)[vector_unit_idx];
             }
         }
-        // Load data from B on DRAM to B_thread_block_tile on shared memory.
-        #pragma unroll
+// Load data from B on DRAM to B_thread_block_tile on shared memory.
+#pragma unroll
         for (size_t load_idx{0U};
-             load_idx < BLOCK_TILE_SIZE_K * BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS / num_threads;
+             load_idx < BLOCK_TILE_SIZE_K * BLOCK_TILE_SIZE_X /
+                            NUM_VECTOR_UNITS / num_threads;
              ++load_idx)
         {
             size_t const B_thread_block_tile_row_idx{
-                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) / (BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS)};
+                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) /
+                (BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS)};
             size_t const B_thread_block_tile_col_idx{
-                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) % (BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS) * NUM_VECTOR_UNITS};
+                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) %
+                (BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS) * NUM_VECTOR_UNITS};
             size_t const B_row_idx{thread_block_tile_idx * BLOCK_TILE_SIZE_K +
                                    B_thread_block_tile_row_idx};
             size_t const B_col_idx{blockIdx.x * BLOCK_TILE_SIZE_X +
                                    B_thread_block_tile_col_idx};
             // This boundary checking might slow down the kernel to some extent.
-            // That's why some specific data formats are beneficial for CUDA kernels.
-            // float4 const val{(B_row_idx < k && B_col_idx < n) ? *reinterpret_cast<float4 const*>(&B[B_row_idx * n + B_col_idx]) : float4{0.f, 0.f, 0.f, 0.f}};
+            // That's why some specific data formats are beneficial for CUDA
+            // kernels. float4 const val{(B_row_idx < k && B_col_idx < n) ?
+            // *reinterpret_cast<float4 const*>(&B[B_row_idx * n + B_col_idx]) :
+            // float4{0.f, 0.f, 0.f, 0.f}};
             // *reinterpret_cast<float4*>(&B_thread_block_tile[B_thread_block_tile_row_idx]
             //                    [B_thread_block_tile_col_idx]) = val;
 
             // float4 val{0.f, 0.f, 0.f, 0.f};
-            // if ((n - B_col_idx) / NUM_VECTOR_UNITS == 0U && (n - B_col_idx) % NUM_VECTOR_UNITS != 0U)
+            // if ((n - B_col_idx) / NUM_VECTOR_UNITS == 0U && (n - B_col_idx) %
+            // NUM_VECTOR_UNITS != 0U)
             // {
             //     size_t const num_remains{(n - B_col_idx) % NUM_VECTOR_UNITS};
-            //     for (size_t vector_unit_idx{0U}; vector_unit_idx < num_remains; ++vector_unit_idx)
+            //     for (size_t vector_unit_idx{0U}; vector_unit_idx <
+            //     num_remains; ++vector_unit_idx)
             //     {
-            //         T const val_single{(B_row_idx < k && B_col_idx + vector_unit_idx < n) ? B[B_row_idx * n + B_col_idx + vector_unit_idx] : static_cast<T>(0)};
+            //         T const val_single{(B_row_idx < k && B_col_idx +
+            //         vector_unit_idx < n) ? B[B_row_idx * n + B_col_idx +
+            //         vector_unit_idx] : static_cast<T>(0)};
             //         reinterpret_cast<T*>(&val)[vector_unit_idx] = val_single;
             //     }
-            //     // T const val{(A_row_idx < m && A_col_idx < k) ? A[A_row_idx * k + A_col_idx] : static_cast<T>(0)};
-            //     // A_thread_block_tile_transposed[A_thread_block_tile_col_idx]
-            //     //                             [A_thread_block_tile_row_idx] = val;
+            //     // T const val{(A_row_idx < m && A_col_idx < k) ? A[A_row_idx
+            //     * k + A_col_idx] : static_cast<T>(0)};
+            //     //
+            //     A_thread_block_tile_transposed[A_thread_block_tile_col_idx]
+            //     //                             [A_thread_block_tile_row_idx]
+            //     = val;
             // }
             // else
             // {
-            //     val = (B_row_idx < k && B_col_idx < n) ? *reinterpret_cast<float4 const*>(&B[B_row_idx * n + B_col_idx]) : float4{0.f, 0.f, 0.f, 0.f};
+            //     val = (B_row_idx < k && B_col_idx < n) ?
+            //     *reinterpret_cast<float4 const*>(&B[B_row_idx * n +
+            //     B_col_idx]) : float4{0.f, 0.f, 0.f, 0.f};
             // }
 
-            float4 const val{*reinterpret_cast<float4 const*>(&B[B_row_idx * n + B_col_idx])};
-            *reinterpret_cast<float4*>(&B_thread_block_tile[B_thread_block_tile_row_idx]
-                               [B_thread_block_tile_col_idx]) = val;
+            float4 const val{*reinterpret_cast<float4 const*>(
+                &B[B_row_idx * n + B_col_idx])};
+            *reinterpret_cast<float4*>(
+                &B_thread_block_tile[B_thread_block_tile_row_idx]
+                                    [B_thread_block_tile_col_idx]) = val;
         }
         __syncthreads();
 
-        // Perform A[:, thread_block_tile_idx:BLOCK_TILE_SIZE_K] *
-        // B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] where A[:,
-        // thread_block_tile_idx:BLOCK_TILE_SIZE_K] and
-        // B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] are cached in the
-        // shared memory as A_thread_block_tile and B_thread_block_tile,
-        // respectively. This inner product is further decomposed to
-        // BLOCK_TILE_SIZE_K outer products. A_thread_block_tile *
-        // B_thread_block_tile = \sigma_{k_i=0}^{BLOCK_TILE_SIZE_K-1}
-        // A_thread_block_tile[:, k_i] @ B_thread_block_tile[k_i, :] Note that
-        // both A_thread_block_tile and B_thread_block_tile can be cached in the
-        // register.
-        // Can use pragma unroll to unroll these static loops to see if there is a performance gain.
-        #pragma unroll
+// Perform A[:, thread_block_tile_idx:BLOCK_TILE_SIZE_K] *
+// B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] where A[:,
+// thread_block_tile_idx:BLOCK_TILE_SIZE_K] and
+// B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] are cached in the
+// shared memory as A_thread_block_tile and B_thread_block_tile,
+// respectively. This inner product is further decomposed to
+// BLOCK_TILE_SIZE_K outer products. A_thread_block_tile *
+// B_thread_block_tile = \sigma_{k_i=0}^{BLOCK_TILE_SIZE_K-1}
+// A_thread_block_tile[:, k_i] @ B_thread_block_tile[k_i, :] Note that
+// both A_thread_block_tile and B_thread_block_tile can be cached in the
+// register.
+// Can use pragma unroll to unroll these static loops to see if there is a
+// performance gain.
+#pragma unroll
         for (size_t k_i{0U}; k_i < BLOCK_TILE_SIZE_K; ++k_i)
         {
-            #pragma unroll
-            for (size_t thread_tile_row_idx{0U}; thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y; ++thread_tile_row_idx)
+#pragma unroll
+            for (size_t thread_tile_row_idx{0U};
+                 thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y;
+                 ++thread_tile_row_idx)
             {
-                size_t const A_thread_block_tile_row_idx{warp_row_idx * WARP_FRAGMENT_SIZE_Y + thread_tile_row_idx * (WARP_FRAGMENT_SIZE_Y / NUM_THREAD_TILES_PER_WARP_Y) + thread_linear_row_idx_in_warp * THREAD_FRAGMENT_SIZE_Y};
+                size_t const A_thread_block_tile_row_idx{
+                    warp_row_idx * WARP_FRAGMENT_SIZE_Y +
+                    thread_tile_row_idx *
+                        (WARP_FRAGMENT_SIZE_Y / NUM_THREAD_TILES_PER_WARP_Y) +
+                    thread_linear_row_idx_in_warp * THREAD_FRAGMENT_SIZE_Y};
                 size_t const A_thread_block_tile_col_idx{k_i};
-                #pragma unroll
-                for (size_t thread_fragment_y_idx{0U}; thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y / NUM_VECTOR_UNITS; ++thread_fragment_y_idx)
+#pragma unroll
+                for (size_t thread_fragment_y_idx{0U};
+                     thread_fragment_y_idx <
+                     THREAD_FRAGMENT_SIZE_Y / NUM_VECTOR_UNITS;
+                     ++thread_fragment_y_idx)
                 {
-                    *reinterpret_cast<float4*>(&A_vals[thread_tile_row_idx][thread_fragment_y_idx * NUM_VECTOR_UNITS]) = *reinterpret_cast<float4 const*>(&A_thread_block_tile_transposed[A_thread_block_tile_col_idx][A_thread_block_tile_row_idx + thread_fragment_y_idx * NUM_VECTOR_UNITS]);
+                    *reinterpret_cast<float4*>(
+                        &A_vals[thread_tile_row_idx]
+                               [thread_fragment_y_idx * NUM_VECTOR_UNITS]) =
+                        *reinterpret_cast<float4 const*>(
+                            &A_thread_block_tile_transposed
+                                [A_thread_block_tile_col_idx]
+                                [A_thread_block_tile_row_idx +
+                                 thread_fragment_y_idx * NUM_VECTOR_UNITS]);
                 }
             }
-            #pragma unroll
-            for (size_t thread_tile_col_idx{0U}; thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X; ++thread_tile_col_idx)
+#pragma unroll
+            for (size_t thread_tile_col_idx{0U};
+                 thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X;
+                 ++thread_tile_col_idx)
             {
                 size_t const B_thread_block_tile_row_idx{k_i};
-                size_t const B_thread_block_tile_col_idx{warp_col_idx * WARP_FRAGMENT_SIZE_X + thread_tile_col_idx * (WARP_FRAGMENT_SIZE_X / NUM_THREAD_TILES_PER_WARP_X) + thread_linear_col_idx_in_warp * THREAD_FRAGMENT_SIZE_X};
-                #pragma unroll
-                for (size_t thread_fragment_x_idx{0U}; thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X / NUM_VECTOR_UNITS; ++thread_fragment_x_idx)
+                size_t const B_thread_block_tile_col_idx{
+                    warp_col_idx * WARP_FRAGMENT_SIZE_X +
+                    thread_tile_col_idx *
+                        (WARP_FRAGMENT_SIZE_X / NUM_THREAD_TILES_PER_WARP_X) +
+                    thread_linear_col_idx_in_warp * THREAD_FRAGMENT_SIZE_X};
+#pragma unroll
+                for (size_t thread_fragment_x_idx{0U};
+                     thread_fragment_x_idx <
+                     THREAD_FRAGMENT_SIZE_X / NUM_VECTOR_UNITS;
+                     ++thread_fragment_x_idx)
                 {
-                    *reinterpret_cast<float4*>(&B_vals[thread_tile_col_idx][thread_fragment_x_idx * NUM_VECTOR_UNITS]) = *reinterpret_cast<float4 const*>(&B_thread_block_tile[B_thread_block_tile_row_idx][B_thread_block_tile_col_idx + thread_fragment_x_idx * NUM_VECTOR_UNITS]);
+                    *reinterpret_cast<float4*>(
+                        &B_vals[thread_tile_col_idx]
+                               [thread_fragment_x_idx * NUM_VECTOR_UNITS]) =
+                        *reinterpret_cast<float4 const*>(
+                            &B_thread_block_tile[B_thread_block_tile_row_idx]
+                                                [B_thread_block_tile_col_idx +
+                                                 thread_fragment_x_idx *
+                                                     NUM_VECTOR_UNITS]);
                 }
             }
 
-            // Compute NUM_THREAD_TILES_PER_WARP_Y * NUM_THREAD_TILES_PER_WARP_X outer products.
-            #pragma unroll
-            for (size_t thread_tile_row_idx{0U}; thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y; ++thread_tile_row_idx)
+// Compute NUM_THREAD_TILES_PER_WARP_Y * NUM_THREAD_TILES_PER_WARP_X outer
+// products.
+#pragma unroll
+            for (size_t thread_tile_row_idx{0U};
+                 thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y;
+                 ++thread_tile_row_idx)
             {
-                #pragma unroll
-                for (size_t thread_tile_col_idx{0U}; thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X; ++thread_tile_col_idx)
+#pragma unroll
+                for (size_t thread_tile_col_idx{0U};
+                     thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X;
+                     ++thread_tile_col_idx)
                 {
-                    #pragma unroll
-                    for (size_t thread_fragment_y_idx{0U}; thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y; ++thread_fragment_y_idx)
+#pragma unroll
+                    for (size_t thread_fragment_y_idx{0U};
+                         thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y;
+                         ++thread_fragment_y_idx)
                     {
-                        #pragma unroll
-                        for (size_t thread_fragment_x_idx{0U}; thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X; ++thread_fragment_x_idx)
+#pragma unroll
+                        for (size_t thread_fragment_x_idx{0U};
+                             thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X;
+                             ++thread_fragment_x_idx)
                         {
-                            C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx] += A_vals[thread_tile_row_idx][thread_fragment_y_idx] * B_vals[thread_tile_col_idx][thread_fragment_x_idx];
+                            C_thread_results[thread_tile_row_idx]
+                                            [thread_tile_col_idx]
+                                            [thread_fragment_y_idx]
+                                            [thread_fragment_x_idx] +=
+                                A_vals[thread_tile_row_idx]
+                                      [thread_fragment_y_idx] *
+                                B_vals[thread_tile_col_idx]
+                                      [thread_fragment_x_idx];
                         }
                     }
                 }
@@ -2288,41 +2682,75 @@ __global__ void gemm_v10(size_t m, size_t n, size_t k, float alpha, T const* A, 
     // Need a synchronization before writing the results to DRAM.
     __syncthreads();
 
-    // Write the results to DRAM.
-    #pragma unroll
-    for (size_t thread_tile_row_idx{0U}; thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y; ++thread_tile_row_idx)
+// Write the results to DRAM.
+#pragma unroll
+    for (size_t thread_tile_row_idx{0U};
+         thread_tile_row_idx < NUM_THREAD_TILES_PER_WARP_Y;
+         ++thread_tile_row_idx)
     {
-        #pragma unroll
-        for (size_t thread_tile_col_idx{0U}; thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X; ++thread_tile_col_idx)
+#pragma unroll
+        for (size_t thread_tile_col_idx{0U};
+             thread_tile_col_idx < NUM_THREAD_TILES_PER_WARP_X;
+             ++thread_tile_col_idx)
         {
-            #pragma unroll
-            for (size_t thread_fragment_y_idx{0U}; thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y; ++thread_fragment_y_idx)
+#pragma unroll
+            for (size_t thread_fragment_y_idx{0U};
+                 thread_fragment_y_idx < THREAD_FRAGMENT_SIZE_Y;
+                 ++thread_fragment_y_idx)
             {
-                #pragma unroll
-                for (size_t thread_fragment_x_idx{0U}; thread_fragment_x_idx < THREAD_FRAGMENT_SIZE_X / NUM_VECTOR_UNITS; ++thread_fragment_x_idx)
+#pragma unroll
+                for (size_t thread_fragment_x_idx{0U};
+                     thread_fragment_x_idx <
+                     THREAD_FRAGMENT_SIZE_X / NUM_VECTOR_UNITS;
+                     ++thread_fragment_x_idx)
                 {
-                    size_t const C_row_idx{blockIdx.y * BLOCK_TILE_SIZE_Y + warp_row_idx * WARP_FRAGMENT_SIZE_Y + thread_tile_row_idx * (WARP_FRAGMENT_SIZE_Y / NUM_THREAD_TILES_PER_WARP_Y) + thread_linear_row_idx_in_warp * THREAD_FRAGMENT_SIZE_Y + thread_fragment_y_idx};
-                    size_t const C_col_idx{blockIdx.x * BLOCK_TILE_SIZE_X + warp_col_idx * WARP_FRAGMENT_SIZE_X + thread_tile_col_idx * (WARP_FRAGMENT_SIZE_X / NUM_THREAD_TILES_PER_WARP_X) + thread_linear_col_idx_in_warp * THREAD_FRAGMENT_SIZE_X + thread_fragment_x_idx * NUM_VECTOR_UNITS};
+                    size_t const C_row_idx{
+                        blockIdx.y * BLOCK_TILE_SIZE_Y +
+                        warp_row_idx * WARP_FRAGMENT_SIZE_Y +
+                        thread_tile_row_idx * (WARP_FRAGMENT_SIZE_Y /
+                                               NUM_THREAD_TILES_PER_WARP_Y) +
+                        thread_linear_row_idx_in_warp * THREAD_FRAGMENT_SIZE_Y +
+                        thread_fragment_y_idx};
+                    size_t const C_col_idx{
+                        blockIdx.x * BLOCK_TILE_SIZE_X +
+                        warp_col_idx * WARP_FRAGMENT_SIZE_X +
+                        thread_tile_col_idx * (WARP_FRAGMENT_SIZE_X /
+                                               NUM_THREAD_TILES_PER_WARP_X) +
+                        thread_linear_col_idx_in_warp * THREAD_FRAGMENT_SIZE_X +
+                        thread_fragment_x_idx * NUM_VECTOR_UNITS};
 
-                    float4 C_vals{*reinterpret_cast<float4*>(&C[C_row_idx * n + C_col_idx])};
-                    #pragma unroll
-                    for (size_t vector_unit_idx{0U}; vector_unit_idx < NUM_VECTOR_UNITS; ++vector_unit_idx)
+                    float4 C_vals{*reinterpret_cast<float4*>(
+                        &C[C_row_idx * n + C_col_idx])};
+#pragma unroll
+                    for (size_t vector_unit_idx{0U};
+                         vector_unit_idx < NUM_VECTOR_UNITS; ++vector_unit_idx)
                     {
-                        // reinterpret_cast<T*>(&C_vals)[vector_unit_idx] = alpha * C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx * NUM_VECTOR_UNITS + vector_unit_idx] + beta * reinterpret_cast<T*>(&C_vals)[vector_unit_idx];
-                        reinterpret_cast<T*>(&C_vals)[vector_unit_idx] = C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx * NUM_VECTOR_UNITS + vector_unit_idx] + reinterpret_cast<T*>(&C_vals)[vector_unit_idx];
+                        // reinterpret_cast<T*>(&C_vals)[vector_unit_idx] =
+                        // alpha *
+                        // C_thread_results[thread_tile_row_idx][thread_tile_col_idx][thread_fragment_y_idx][thread_fragment_x_idx
+                        // * NUM_VECTOR_UNITS + vector_unit_idx] + beta *
+                        // reinterpret_cast<T*>(&C_vals)[vector_unit_idx];
+                        reinterpret_cast<T*>(&C_vals)[vector_unit_idx] =
+                            C_thread_results[thread_tile_row_idx]
+                                            [thread_tile_col_idx]
+                                            [thread_fragment_y_idx]
+                                            [thread_fragment_x_idx *
+                                                 NUM_VECTOR_UNITS +
+                                             vector_unit_idx] +
+                            reinterpret_cast<T*>(&C_vals)[vector_unit_idx];
                     }
-                    *reinterpret_cast<float4*>(&C[C_row_idx * n + C_col_idx]) = C_vals;
+                    *reinterpret_cast<float4*>(&C[C_row_idx * n + C_col_idx]) =
+                        C_vals;
                 }
             }
         }
     }
 }
 
-
 template <typename T>
 void launch_gemm_kernel_v10(size_t m, size_t n, size_t k, float alpha,
-                           T const* A, T const* B, float beta, T* C,
-                           cudaStream_t stream)
+                            T const* A, T const* B, float beta, T* C,
+                            cudaStream_t stream)
 {
     // This kernel is sensitive to the parameters.
     // How to select good paramters?
@@ -2336,8 +2764,10 @@ void launch_gemm_kernel_v10(size_t m, size_t n, size_t k, float alpha,
     constexpr unsigned int WARP_FRAGMENT_SIZE_X{32U};
     constexpr unsigned int WARP_FRAGMENT_SIZE_Y{64U};
 
-    constexpr unsigned int NUM_WARPS_X{BLOCK_TILE_SIZE_X / WARP_FRAGMENT_SIZE_X};
-    constexpr unsigned int NUM_WARPS_Y{BLOCK_TILE_SIZE_Y / WARP_FRAGMENT_SIZE_Y};
+    constexpr unsigned int NUM_WARPS_X{BLOCK_TILE_SIZE_X /
+                                       WARP_FRAGMENT_SIZE_X};
+    constexpr unsigned int NUM_WARPS_Y{BLOCK_TILE_SIZE_Y /
+                                       WARP_FRAGMENT_SIZE_Y};
     static_assert(BLOCK_TILE_SIZE_X % WARP_FRAGMENT_SIZE_X == 0U);
     static_assert(BLOCK_TILE_SIZE_Y % WARP_FRAGMENT_SIZE_Y == 0U);
 
@@ -2346,7 +2776,6 @@ void launch_gemm_kernel_v10(size_t m, size_t n, size_t k, float alpha,
     // 4, 4 slightly better than 8, 8
     constexpr unsigned int THREAD_FRAGMENT_SIZE_X{8U};
     constexpr unsigned int THREAD_FRAGMENT_SIZE_Y{8U};
-
 
     // To use float4 for 128bit vectorized memory access.
     constexpr size_t NUM_VECTOR_UNITS{sizeof(float4) / sizeof(T)};
@@ -2360,12 +2789,18 @@ void launch_gemm_kernel_v10(size_t m, size_t n, size_t k, float alpha,
     constexpr unsigned int NUM_THREADS_PER_WARP_Y{8U};
 
     // constexpr unsigned int NUM_THREAD_TILES_PER_WARP_X{WARP_FRAGMENT_SIZE_X /
-    //                                                     (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X)};
+    //                                                     (THREAD_FRAGMENT_SIZE_X
+    //                                                     * NUM_THREADS_PER_WARP_X)};
     // constexpr unsigned int NUM_THREAD_TILES_PER_WARP_Y{WARP_FRAGMENT_SIZE_Y /
-    //                                                     (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y)};
+    //                                                     (THREAD_FRAGMENT_SIZE_Y
+    //                                                     * NUM_THREADS_PER_WARP_Y)};
 
-    static_assert(WARP_FRAGMENT_SIZE_X % (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X) == 0U);
-    static_assert(WARP_FRAGMENT_SIZE_Y % (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y) == 0U);
+    static_assert(WARP_FRAGMENT_SIZE_X %
+                      (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X) ==
+                  0U);
+    static_assert(WARP_FRAGMENT_SIZE_Y %
+                      (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y) ==
+                  0U);
 
     constexpr unsigned int NUM_THREADS_X{NUM_WARPS_X * NUM_THREADS_PER_WARP_X};
     constexpr unsigned int NUM_THREADS_Y{NUM_WARPS_Y * NUM_THREADS_PER_WARP_Y};
@@ -2380,28 +2815,27 @@ void launch_gemm_kernel_v10(size_t m, size_t n, size_t k, float alpha,
         (static_cast<unsigned int>(m) + BLOCK_TILE_SIZE_Y - 1U) /
             BLOCK_TILE_SIZE_Y,
         1U};
-    gemm_v10<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K, WARP_FRAGMENT_SIZE_X, WARP_FRAGMENT_SIZE_Y, THREAD_FRAGMENT_SIZE_X, THREAD_FRAGMENT_SIZE_Y, NUM_THREADS_PER_WARP_X, NUM_THREADS_PER_WARP_Y>
+    gemm_v10<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+             WARP_FRAGMENT_SIZE_X, WARP_FRAGMENT_SIZE_Y, THREAD_FRAGMENT_SIZE_X,
+             THREAD_FRAGMENT_SIZE_Y, NUM_THREADS_PER_WARP_X,
+             NUM_THREADS_PER_WARP_Y>
         <<<grid_dim, block_dim, 0U, stream>>>(m, n, k, alpha, A, B, beta, C);
     CHECK_LAST_CUDA_ERROR();
 }
-
 
 // Play with some FP16 GEMM TensorCore
 // 2D warp tiling with vectorized data IO
 // Each thread in the block processes BLOCK_FRAGMENT_SIZE_Y *
 // BLOCK_FRAGMENT_SIZE_X output values. Number of threads BLOCK_TILE_SIZE_Y *
 // BLOCK_TILE_SIZE_X / (BLOCK_FRAGMENT_SIZE_Y * BLOCK_FRAGMENT_SIZE_X)
-template <typename T, unsigned int BLOCK_TILE_SIZE_X,
-          unsigned int BLOCK_TILE_SIZE_Y, unsigned int BLOCK_TILE_SIZE_K,
-          unsigned int WARP_FRAGMENT_SIZE_X,
-          unsigned int WARP_FRAGMENT_SIZE_Y,
-          unsigned int WMMA_FRAGMENT_SIZE_X,
-          unsigned int WMMA_FRAGMENT_SIZE_Y,
-          unsigned int WMMA_FRAGMENT_SIZE_K,
-          unsigned int NUM_THREADS_PER_WARP_X,
-          unsigned int NUM_THREADS_PER_WARP_Y>
-__global__ void gemm_v11(size_t m, size_t n, size_t k, float alpha, T const* A, T const* B,
-            float beta, T* C)
+template <
+    typename T, unsigned int BLOCK_TILE_SIZE_X, unsigned int BLOCK_TILE_SIZE_Y,
+    unsigned int BLOCK_TILE_SIZE_K, unsigned int WARP_FRAGMENT_SIZE_X,
+    unsigned int WARP_FRAGMENT_SIZE_Y, unsigned int WMMA_FRAGMENT_SIZE_X,
+    unsigned int WMMA_FRAGMENT_SIZE_Y, unsigned int WMMA_FRAGMENT_SIZE_K,
+    unsigned int NUM_THREADS_PER_WARP_X, unsigned int NUM_THREADS_PER_WARP_Y>
+__global__ void gemm_v11(size_t m, size_t n, size_t k, float alpha, T const* A,
+                         T const* B, float beta, T* C)
 {
     static_assert(NUM_THREADS_PER_WARP_X * NUM_THREADS_PER_WARP_Y == 32U);
     constexpr size_t NUM_WARPS_X{BLOCK_TILE_SIZE_X / WARP_FRAGMENT_SIZE_X};
@@ -2419,8 +2853,10 @@ __global__ void gemm_v11(size_t m, size_t n, size_t k, float alpha, T const* A, 
         A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_Y];
     __shared__ T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X];
 
-    constexpr size_t NUM_WMMA_TILES_X{WARP_FRAGMENT_SIZE_X / WMMA_FRAGMENT_SIZE_X};
-    constexpr size_t NUM_WMMA_TILES_Y{WARP_FRAGMENT_SIZE_Y / WMMA_FRAGMENT_SIZE_Y};
+    constexpr size_t NUM_WMMA_TILES_X{WARP_FRAGMENT_SIZE_X /
+                                      WMMA_FRAGMENT_SIZE_X};
+    constexpr size_t NUM_WMMA_TILES_Y{WARP_FRAGMENT_SIZE_Y /
+                                      WMMA_FRAGMENT_SIZE_Y};
     constexpr size_t NUM_WMMA_TILES_K{BLOCK_TILE_SIZE_K / WMMA_FRAGMENT_SIZE_K};
 
     static_assert(WARP_FRAGMENT_SIZE_X % WMMA_FRAGMENT_SIZE_X == 0U);
@@ -2428,33 +2864,41 @@ __global__ void gemm_v11(size_t m, size_t n, size_t k, float alpha, T const* A, 
     static_assert(BLOCK_TILE_SIZE_K % WMMA_FRAGMENT_SIZE_K == 0U);
 
     // Declare the fragments.
-    nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, WMMA_FRAGMENT_SIZE_Y, WMMA_FRAGMENT_SIZE_X, WMMA_FRAGMENT_SIZE_K, T,
+    nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, WMMA_FRAGMENT_SIZE_Y,
+                           WMMA_FRAGMENT_SIZE_X, WMMA_FRAGMENT_SIZE_K, T,
                            nvcuda::wmma::col_major>
         a_frags[NUM_WMMA_TILES_Y];
-    nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, WMMA_FRAGMENT_SIZE_Y, WMMA_FRAGMENT_SIZE_X, WMMA_FRAGMENT_SIZE_K, T,
+    nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, WMMA_FRAGMENT_SIZE_Y,
+                           WMMA_FRAGMENT_SIZE_X, WMMA_FRAGMENT_SIZE_K, T,
                            nvcuda::wmma::row_major>
         b_frags[NUM_WMMA_TILES_X];
-    nvcuda::wmma::fragment<nvcuda::wmma::accumulator, WMMA_FRAGMENT_SIZE_Y, WMMA_FRAGMENT_SIZE_X, WMMA_FRAGMENT_SIZE_K,
-                           T>
+    nvcuda::wmma::fragment<nvcuda::wmma::accumulator, WMMA_FRAGMENT_SIZE_Y,
+                           WMMA_FRAGMENT_SIZE_X, WMMA_FRAGMENT_SIZE_K, T>
         acc_frags[NUM_WMMA_TILES_Y][NUM_WMMA_TILES_X];
-    nvcuda::wmma::fragment<nvcuda::wmma::accumulator, WMMA_FRAGMENT_SIZE_Y, WMMA_FRAGMENT_SIZE_X, WMMA_FRAGMENT_SIZE_K,
-                           T>
+    nvcuda::wmma::fragment<nvcuda::wmma::accumulator, WMMA_FRAGMENT_SIZE_Y,
+                           WMMA_FRAGMENT_SIZE_X, WMMA_FRAGMENT_SIZE_K, T>
         c_frag;
 
-    // Make sure the accumulator starts from 0.
-    #pragma unroll
-    for (size_t wmma_tile_row_idx{0U}; wmma_tile_row_idx < NUM_WMMA_TILES_Y; ++wmma_tile_row_idx)
+// Make sure the accumulator starts from 0.
+#pragma unroll
+    for (size_t wmma_tile_row_idx{0U}; wmma_tile_row_idx < NUM_WMMA_TILES_Y;
+         ++wmma_tile_row_idx)
     {
-        for (size_t wmma_tile_col_idx{0U}; wmma_tile_col_idx < NUM_WMMA_TILES_X; ++wmma_tile_col_idx)
+        for (size_t wmma_tile_col_idx{0U}; wmma_tile_col_idx < NUM_WMMA_TILES_X;
+             ++wmma_tile_col_idx)
         {
-            nvcuda::wmma::fill_fragment(acc_frags[wmma_tile_row_idx][wmma_tile_col_idx], static_cast<T>(0));
+            nvcuda::wmma::fill_fragment(
+                acc_frags[wmma_tile_row_idx][wmma_tile_col_idx],
+                static_cast<T>(0));
         }
     }
 
     // // B_vals is cached in the register.
-    // T B_vals[NUM_THREAD_TILES_PER_WARP_X][THREAD_FRAGMENT_SIZE_X] = {static_cast<T>(0)};
+    // T B_vals[NUM_THREAD_TILES_PER_WARP_X][THREAD_FRAGMENT_SIZE_X] =
+    // {static_cast<T>(0)};
     // // A_vals is cached in the register.
-    // T A_vals[NUM_THREAD_TILES_PER_WARP_Y][THREAD_FRAGMENT_SIZE_Y] = {static_cast<T>(0)};
+    // T A_vals[NUM_THREAD_TILES_PER_WARP_Y][THREAD_FRAGMENT_SIZE_Y] =
+    // {static_cast<T>(0)};
 
     // size_t const num_threads{blockDim.x};
     constexpr size_t num_threads{NUM_THREADS_PER_BLOCK};
@@ -2463,8 +2907,10 @@ __global__ void gemm_v11(size_t m, size_t n, size_t k, float alpha, T const* A, 
     size_t const warp_row_idx{warp_linear_idx / NUM_WARPS_X};
     size_t const warp_col_idx{warp_linear_idx % NUM_WARPS_X};
     size_t const thread_linear_idx_in_warp{threadIdx.x % 32U};
-    size_t const thread_linear_row_idx_in_warp{thread_linear_idx_in_warp / NUM_THREADS_PER_WARP_X};
-    size_t const thread_linear_col_idx_in_warp{thread_linear_idx_in_warp % NUM_THREADS_PER_WARP_X};
+    size_t const thread_linear_row_idx_in_warp{thread_linear_idx_in_warp /
+                                               NUM_THREADS_PER_WARP_X};
+    size_t const thread_linear_col_idx_in_warp{thread_linear_idx_in_warp %
+                                               NUM_THREADS_PER_WARP_X};
 
     // Number of outer loops to perform the sum of inner products.
     // C_thread_block_tile =
@@ -2473,92 +2919,133 @@ __global__ void gemm_v11(size_t m, size_t n, size_t k, float alpha, T const* A, 
     // B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :]
     size_t const num_thread_block_tiles{(k + BLOCK_TILE_SIZE_K - 1U) /
                                         BLOCK_TILE_SIZE_K};
-    // Each thread in the block processes NUM_THREAD_TILES_PER_WARP_Y * NUM_THREAD_TILES_PER_WARP_X * THREAD_FRAGMENT_SIZE_Y * THREAD_FRAGMENT_SIZE_X output values.
-    // Specifically, these values corresponds to
-    // 
-    // T C_thread_results[NUM_THREAD_TILES_PER_WARP_Y][NUM_THREAD_TILES_PER_WARP_X][THREAD_FRAGMENT_SIZE_Y][THREAD_FRAGMENT_SIZE_X] = {
+    // Each thread in the block processes NUM_THREAD_TILES_PER_WARP_Y *
+    // NUM_THREAD_TILES_PER_WARP_X * THREAD_FRAGMENT_SIZE_Y *
+    // THREAD_FRAGMENT_SIZE_X output values. Specifically, these values
+    // corresponds to
+    //
+    // T
+    // C_thread_results[NUM_THREAD_TILES_PER_WARP_Y][NUM_THREAD_TILES_PER_WARP_X][THREAD_FRAGMENT_SIZE_Y][THREAD_FRAGMENT_SIZE_X]
+    // = {
     //     static_cast<T>(0)};
 
     for (size_t thread_block_tile_idx{0U};
          thread_block_tile_idx < num_thread_block_tiles;
          ++thread_block_tile_idx)
     {
-        // Question / TODO: Can this load function be a warp based function?
-        // Load data from A on DRAM to A_thread_block_tile on shared memory.
-        #pragma unroll
+// Question / TODO: Can this load function be a warp based function?
+// Load data from A on DRAM to A_thread_block_tile on shared memory.
+#pragma unroll
         for (size_t load_idx{0U};
-             load_idx < BLOCK_TILE_SIZE_Y * BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS / num_threads;
+             load_idx < BLOCK_TILE_SIZE_Y * BLOCK_TILE_SIZE_K /
+                            NUM_VECTOR_UNITS / num_threads;
              ++load_idx)
         {
             size_t const A_thread_block_tile_row_idx{
-                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) / (BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS)};
+                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) /
+                (BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS)};
             size_t const A_thread_block_tile_col_idx{
-                ((threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) % (BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS)) * NUM_VECTOR_UNITS};
+                ((threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) %
+                 (BLOCK_TILE_SIZE_K / NUM_VECTOR_UNITS)) *
+                NUM_VECTOR_UNITS};
             size_t const A_row_idx{blockIdx.y * BLOCK_TILE_SIZE_Y +
                                    A_thread_block_tile_row_idx};
             size_t const A_col_idx{thread_block_tile_idx * BLOCK_TILE_SIZE_K +
                                    A_thread_block_tile_col_idx};
 
-            float4 const val{*reinterpret_cast<float4 const*>(&A[A_row_idx * k + A_col_idx])};
+            float4 const val{*reinterpret_cast<float4 const*>(
+                &A[A_row_idx * k + A_col_idx])};
 
-            #pragma unroll
-            for (size_t vector_unit_idx{0U}; vector_unit_idx < NUM_VECTOR_UNITS; ++vector_unit_idx)
+#pragma unroll
+            for (size_t vector_unit_idx{0U}; vector_unit_idx < NUM_VECTOR_UNITS;
+                 ++vector_unit_idx)
             {
-                A_thread_block_tile_transposed[A_thread_block_tile_col_idx + vector_unit_idx][A_thread_block_tile_row_idx] = reinterpret_cast<T const*>(&val)[vector_unit_idx];
+                A_thread_block_tile_transposed[A_thread_block_tile_col_idx +
+                                               vector_unit_idx]
+                                              [A_thread_block_tile_row_idx] =
+                                                  reinterpret_cast<T const*>(
+                                                      &val)[vector_unit_idx];
             }
         }
-        // Load data from B on DRAM to B_thread_block_tile on shared memory.
-        #pragma unroll
+// Load data from B on DRAM to B_thread_block_tile on shared memory.
+#pragma unroll
         for (size_t load_idx{0U};
-             load_idx < BLOCK_TILE_SIZE_K * BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS / num_threads;
+             load_idx < BLOCK_TILE_SIZE_K * BLOCK_TILE_SIZE_X /
+                            NUM_VECTOR_UNITS / num_threads;
              ++load_idx)
         {
             size_t const B_thread_block_tile_row_idx{
-                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) / (BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS)};
+                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) /
+                (BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS)};
             size_t const B_thread_block_tile_col_idx{
-                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) % (BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS) * NUM_VECTOR_UNITS};
+                (threadIdx.x + load_idx * NUM_THREADS_PER_BLOCK) %
+                (BLOCK_TILE_SIZE_X / NUM_VECTOR_UNITS) * NUM_VECTOR_UNITS};
             size_t const B_row_idx{thread_block_tile_idx * BLOCK_TILE_SIZE_K +
                                    B_thread_block_tile_row_idx};
             size_t const B_col_idx{blockIdx.x * BLOCK_TILE_SIZE_X +
                                    B_thread_block_tile_col_idx};
 
-            float4 const val{*reinterpret_cast<float4 const*>(&B[B_row_idx * n + B_col_idx])};
-            *reinterpret_cast<float4*>(&B_thread_block_tile[B_thread_block_tile_row_idx]
-                               [B_thread_block_tile_col_idx]) = val;
+            float4 const val{*reinterpret_cast<float4 const*>(
+                &B[B_row_idx * n + B_col_idx])};
+            *reinterpret_cast<float4*>(
+                &B_thread_block_tile[B_thread_block_tile_row_idx]
+                                    [B_thread_block_tile_col_idx]) = val;
         }
         __syncthreads();
 
-        // Perform A[:, thread_block_tile_idx:BLOCK_TILE_SIZE_K] *
-        // B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] where A[:,
-        // thread_block_tile_idx:BLOCK_TILE_SIZE_K] and
-        // B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] are cached in the
-        // shared memory as A_thread_block_tile and B_thread_block_tile,
-        // respectively. This inner product is further decomposed to
-        // BLOCK_TILE_SIZE_K outer products. A_thread_block_tile *
-        // B_thread_block_tile = \sigma_{k_i=0}^{BLOCK_TILE_SIZE_K-1}
-        // A_thread_block_tile[:, k_i] @ B_thread_block_tile[k_i, :] Note that
-        // both A_thread_block_tile and B_thread_block_tile can be cached in the
-        // register.
-        // Can use pragma unroll to unroll these static loops to see if there is a performance gain.
-        #pragma unroll
+// Perform A[:, thread_block_tile_idx:BLOCK_TILE_SIZE_K] *
+// B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] where A[:,
+// thread_block_tile_idx:BLOCK_TILE_SIZE_K] and
+// B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] are cached in the
+// shared memory as A_thread_block_tile and B_thread_block_tile,
+// respectively. This inner product is further decomposed to
+// BLOCK_TILE_SIZE_K outer products. A_thread_block_tile *
+// B_thread_block_tile = \sigma_{k_i=0}^{BLOCK_TILE_SIZE_K-1}
+// A_thread_block_tile[:, k_i] @ B_thread_block_tile[k_i, :] Note that
+// both A_thread_block_tile and B_thread_block_tile can be cached in the
+// register.
+// Can use pragma unroll to unroll these static loops to see if there is a
+// performance gain.
+#pragma unroll
         for (size_t k_i{0U}; k_i < NUM_WMMA_TILES_K; ++k_i)
         {
-            #pragma unroll
-            for (size_t wmma_tile_row_idx{0U}; wmma_tile_row_idx < NUM_WMMA_TILES_Y; ++wmma_tile_row_idx)
+#pragma unroll
+            for (size_t wmma_tile_row_idx{0U};
+                 wmma_tile_row_idx < NUM_WMMA_TILES_Y; ++wmma_tile_row_idx)
             {
-                #pragma unroll
-                for (size_t wmma_tile_col_idx{0U}; wmma_tile_col_idx < NUM_WMMA_TILES_X; ++wmma_tile_col_idx)
+#pragma unroll
+                for (size_t wmma_tile_col_idx{0U};
+                     wmma_tile_col_idx < NUM_WMMA_TILES_X; ++wmma_tile_col_idx)
                 {
                     // // Load the fragment from shared memory.
-                    nvcuda::wmma::load_matrix_sync(a_frags[wmma_tile_row_idx], &A_thread_block_tile_transposed[k_i * WMMA_FRAGMENT_SIZE_K][warp_row_idx * WARP_FRAGMENT_SIZE_Y + wmma_tile_row_idx * WMMA_FRAGMENT_SIZE_Y], BLOCK_TILE_SIZE_Y);
-                    nvcuda::wmma::load_matrix_sync(b_frags[wmma_tile_col_idx], &B_thread_block_tile[k_i * WMMA_FRAGMENT_SIZE_K][warp_col_idx * WARP_FRAGMENT_SIZE_X + wmma_tile_col_idx * WMMA_FRAGMENT_SIZE_Y], BLOCK_TILE_SIZE_X);
+                    nvcuda::wmma::load_matrix_sync(
+                        a_frags[wmma_tile_row_idx],
+                        &A_thread_block_tile_transposed
+                            [k_i * WMMA_FRAGMENT_SIZE_K]
+                            [warp_row_idx * WARP_FRAGMENT_SIZE_Y +
+                             wmma_tile_row_idx * WMMA_FRAGMENT_SIZE_Y],
+                        BLOCK_TILE_SIZE_Y);
+                    nvcuda::wmma::load_matrix_sync(
+                        b_frags[wmma_tile_col_idx],
+                        &B_thread_block_tile[k_i * WMMA_FRAGMENT_SIZE_K]
+                                            [warp_col_idx *
+                                                 WARP_FRAGMENT_SIZE_X +
+                                             wmma_tile_col_idx *
+                                                 WMMA_FRAGMENT_SIZE_Y],
+                        BLOCK_TILE_SIZE_X);
 
-                    // nvcuda::wmma::load_matrix_sync(a_frags[wmma_tile_row_idx], &A_thread_block_tile_transposed[0][warp_row_idx * WARP_FRAGMENT_SIZE_Y + wmma_tile_row_idx * WMMA_FRAGMENT_SIZE_Y], WARP_FRAGMENT_SIZE_Y);
-                    // nvcuda::wmma::load_matrix_sync(b_frags[wmma_tile_col_idx], &B_thread_block_tile[0][0], WARP_FRAGMENT_SIZE_X);
-
+                    // nvcuda::wmma::load_matrix_sync(a_frags[wmma_tile_row_idx],
+                    // &A_thread_block_tile_transposed[0][warp_row_idx *
+                    // WARP_FRAGMENT_SIZE_Y + wmma_tile_row_idx *
+                    // WMMA_FRAGMENT_SIZE_Y], WARP_FRAGMENT_SIZE_Y);
+                    // nvcuda::wmma::load_matrix_sync(b_frags[wmma_tile_col_idx],
+                    // &B_thread_block_tile[0][0], WARP_FRAGMENT_SIZE_X);
 
                     // Perform the matrix multiplication.
-                    nvcuda::wmma::mma_sync(acc_frags[wmma_tile_row_idx][wmma_tile_col_idx], a_frags[wmma_tile_row_idx], b_frags[wmma_tile_col_idx], acc_frags[wmma_tile_row_idx][wmma_tile_col_idx]);
+                    nvcuda::wmma::mma_sync(
+                        acc_frags[wmma_tile_row_idx][wmma_tile_col_idx],
+                        a_frags[wmma_tile_row_idx], b_frags[wmma_tile_col_idx],
+                        acc_frags[wmma_tile_row_idx][wmma_tile_col_idx]);
                 }
             }
         }
@@ -2568,33 +3055,57 @@ __global__ void gemm_v11(size_t m, size_t n, size_t k, float alpha, T const* A, 
     // Need a synchronization before writing the results to DRAM.
     __syncthreads();
 
-    // Write the results to DRAM.
-    #pragma unroll
-    for (size_t wmma_tile_row_idx{0U}; wmma_tile_row_idx < NUM_WMMA_TILES_Y; ++wmma_tile_row_idx)
+// Write the results to DRAM.
+#pragma unroll
+    for (size_t wmma_tile_row_idx{0U}; wmma_tile_row_idx < NUM_WMMA_TILES_Y;
+         ++wmma_tile_row_idx)
     {
-        #pragma unroll
-        for (size_t wmma_tile_col_idx{0U}; wmma_tile_col_idx < NUM_WMMA_TILES_X; ++wmma_tile_col_idx)
+#pragma unroll
+        for (size_t wmma_tile_col_idx{0U}; wmma_tile_col_idx < NUM_WMMA_TILES_X;
+             ++wmma_tile_col_idx)
         {
             // Load the fragment from shared memory.
-            // T* matrix_mma_c_mptr{C + blockIdx.y * BLOCK_TILE_SIZE_Y + warp_row_idx * WARP_FRAGMENT_SIZE_Y + wmma_tile_row_idx * WMMA_FRAGMENT_SIZE_Y};
-            nvcuda::wmma::load_matrix_sync(c_frag, &C[(blockIdx.y * BLOCK_TILE_SIZE_Y + warp_row_idx * WARP_FRAGMENT_SIZE_Y + wmma_tile_row_idx * WMMA_FRAGMENT_SIZE_Y) * n + blockIdx.x * BLOCK_TILE_SIZE_X + warp_col_idx * WARP_FRAGMENT_SIZE_X + wmma_tile_col_idx * WMMA_FRAGMENT_SIZE_X], n, nvcuda::wmma::mem_row_major);
+            // T* matrix_mma_c_mptr{C + blockIdx.y * BLOCK_TILE_SIZE_Y +
+            // warp_row_idx * WARP_FRAGMENT_SIZE_Y + wmma_tile_row_idx *
+            // WMMA_FRAGMENT_SIZE_Y};
+            nvcuda::wmma::load_matrix_sync(
+                c_frag,
+                &C[(blockIdx.y * BLOCK_TILE_SIZE_Y +
+                    warp_row_idx * WARP_FRAGMENT_SIZE_Y +
+                    wmma_tile_row_idx * WMMA_FRAGMENT_SIZE_Y) *
+                       n +
+                   blockIdx.x * BLOCK_TILE_SIZE_X +
+                   warp_col_idx * WARP_FRAGMENT_SIZE_X +
+                   wmma_tile_col_idx * WMMA_FRAGMENT_SIZE_X],
+                n, nvcuda::wmma::mem_row_major);
             // Perform scaling and addition.
             for (uint32_t i = 0; i < c_frag.num_elements; ++i)
             {
-                // c_frags[wmma_tile_row_idx][wmma_tile_col_idx].x[i] = alpha * acc_frags[wmma_tile_row_idx][wmma_tile_col_idx].x[i] + beta * c_frags[wmma_tile_row_idx][wmma_tile_col_idx].x[i];
-                c_frag.x[i] = acc_frags[wmma_tile_row_idx][wmma_tile_col_idx].x[i] + c_frag.x[i];
+                // c_frags[wmma_tile_row_idx][wmma_tile_col_idx].x[i] = alpha *
+                // acc_frags[wmma_tile_row_idx][wmma_tile_col_idx].x[i] + beta *
+                // c_frags[wmma_tile_row_idx][wmma_tile_col_idx].x[i];
+                c_frag.x[i] =
+                    acc_frags[wmma_tile_row_idx][wmma_tile_col_idx].x[i] +
+                    c_frag.x[i];
             }
             // Store the fragment back to shared memory.
-            nvcuda::wmma::store_matrix_sync(&C[(blockIdx.y * BLOCK_TILE_SIZE_Y + warp_row_idx * WARP_FRAGMENT_SIZE_Y + wmma_tile_row_idx * WMMA_FRAGMENT_SIZE_Y) * n + blockIdx.x * BLOCK_TILE_SIZE_X + warp_col_idx * WARP_FRAGMENT_SIZE_X + wmma_tile_col_idx * WMMA_FRAGMENT_SIZE_X], c_frag, n, nvcuda::wmma::mem_row_major);
+            nvcuda::wmma::store_matrix_sync(
+                &C[(blockIdx.y * BLOCK_TILE_SIZE_Y +
+                    warp_row_idx * WARP_FRAGMENT_SIZE_Y +
+                    wmma_tile_row_idx * WMMA_FRAGMENT_SIZE_Y) *
+                       n +
+                   blockIdx.x * BLOCK_TILE_SIZE_X +
+                   warp_col_idx * WARP_FRAGMENT_SIZE_X +
+                   wmma_tile_col_idx * WMMA_FRAGMENT_SIZE_X],
+                c_frag, n, nvcuda::wmma::mem_row_major);
         }
     }
 }
 
-
 template <typename T>
 void launch_gemm_kernel_v11(size_t m, size_t n, size_t k, float alpha,
-                           T const* A, T const* B, float beta, T* C,
-                           cudaStream_t stream)
+                            T const* A, T const* B, float beta, T* C,
+                            cudaStream_t stream)
 {
 
     constexpr unsigned int BLOCK_TILE_SIZE_X{128U};
@@ -2604,15 +3115,16 @@ void launch_gemm_kernel_v11(size_t m, size_t n, size_t k, float alpha,
     constexpr unsigned int WARP_FRAGMENT_SIZE_X{32U};
     constexpr unsigned int WARP_FRAGMENT_SIZE_Y{64U};
 
-    constexpr unsigned int NUM_WARPS_X{BLOCK_TILE_SIZE_X / WARP_FRAGMENT_SIZE_X};
-    constexpr unsigned int NUM_WARPS_Y{BLOCK_TILE_SIZE_Y / WARP_FRAGMENT_SIZE_Y};
+    constexpr unsigned int NUM_WARPS_X{BLOCK_TILE_SIZE_X /
+                                       WARP_FRAGMENT_SIZE_X};
+    constexpr unsigned int NUM_WARPS_Y{BLOCK_TILE_SIZE_Y /
+                                       WARP_FRAGMENT_SIZE_Y};
     static_assert(BLOCK_TILE_SIZE_X % WARP_FRAGMENT_SIZE_X == 0U);
     static_assert(BLOCK_TILE_SIZE_Y % WARP_FRAGMENT_SIZE_Y == 0U);
 
     constexpr unsigned int WMMA_FRAGMENT_SIZE_X{16U};
     constexpr unsigned int WMMA_FRAGMENT_SIZE_Y{16U};
     constexpr unsigned int WMMA_FRAGMENT_SIZE_K{16U};
-
 
     // To use float4 for 128bit vectorized memory access.
     constexpr size_t NUM_VECTOR_UNITS{sizeof(float4) / sizeof(T)};
@@ -2625,8 +3137,9 @@ void launch_gemm_kernel_v11(size_t m, size_t n, size_t k, float alpha,
     constexpr unsigned int NUM_THREADS_PER_WARP_X{4U};
     constexpr unsigned int NUM_THREADS_PER_WARP_Y{8U};
 
-    // static_assert(WARP_FRAGMENT_SIZE_X % (THREAD_FRAGMENT_SIZE_X * NUM_THREADS_PER_WARP_X) == 0U);
-    // static_assert(WARP_FRAGMENT_SIZE_Y % (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y) == 0U);
+    // static_assert(WARP_FRAGMENT_SIZE_X % (THREAD_FRAGMENT_SIZE_X *
+    // NUM_THREADS_PER_WARP_X) == 0U); static_assert(WARP_FRAGMENT_SIZE_Y %
+    // (THREAD_FRAGMENT_SIZE_Y * NUM_THREADS_PER_WARP_Y) == 0U);
 
     constexpr unsigned int NUM_THREADS_X{NUM_WARPS_X * NUM_THREADS_PER_WARP_X};
     constexpr unsigned int NUM_THREADS_Y{NUM_WARPS_Y * NUM_THREADS_PER_WARP_Y};
@@ -2641,11 +3154,13 @@ void launch_gemm_kernel_v11(size_t m, size_t n, size_t k, float alpha,
         (static_cast<unsigned int>(m) + BLOCK_TILE_SIZE_Y - 1U) /
             BLOCK_TILE_SIZE_Y,
         1U};
-    gemm_v11<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K, WARP_FRAGMENT_SIZE_X, WARP_FRAGMENT_SIZE_Y, WMMA_FRAGMENT_SIZE_X, WMMA_FRAGMENT_SIZE_Y, WMMA_FRAGMENT_SIZE_K, NUM_THREADS_PER_WARP_X, NUM_THREADS_PER_WARP_Y>
+    gemm_v11<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+             WARP_FRAGMENT_SIZE_X, WARP_FRAGMENT_SIZE_Y, WMMA_FRAGMENT_SIZE_X,
+             WMMA_FRAGMENT_SIZE_Y, WMMA_FRAGMENT_SIZE_K, NUM_THREADS_PER_WARP_X,
+             NUM_THREADS_PER_WARP_Y>
         <<<grid_dim, block_dim, 0U, stream>>>(m, n, k, alpha, A, B, beta, C);
     CHECK_LAST_CUDA_ERROR();
 }
-
 
 int main()
 {
@@ -2686,7 +3201,6 @@ int main()
     // constexpr size_t m{513U};
     // constexpr size_t k{513U};
     // constexpr size_t n{521U};
-
 
     std::cout << "GEMM Sizes: " << std::endl;
     std::cout << "m = " << m << std::endl;
@@ -2910,7 +3424,6 @@ int main()
               << std::endl;
     std::cout << std::endl;
 
-
     // Use kernel v5 to compute GEMM.
     // Set h_mat_c and h_mat_c_cpu to zero for GEMM.
     CHECK_CUDA_ERROR(
@@ -2918,8 +3431,8 @@ int main()
     CHECK_CUDA_ERROR(cudaMemcpyAsync(d_mat_c, h_mat_c, m * n * sizeof(float),
                                      cudaMemcpyHostToDevice, stream));
 
-    launch_gemm_kernel_siboehm_v5(m, n, k, alpha, d_mat_a, d_mat_b, beta, d_mat_c,
-                          stream);
+    launch_gemm_kernel_siboehm_v5(m, n, k, alpha, d_mat_a, d_mat_b, beta,
+                                  d_mat_c, stream);
     CHECK_CUDA_ERROR(cudaMemcpyAsync(h_mat_c, d_mat_c, m * n * sizeof(float),
                                      cudaMemcpyDeviceToHost, stream));
     CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
@@ -2932,8 +3445,8 @@ int main()
                   d_mat_b, beta, d_mat_c, std::placeholders::_1)};
     float const latency_kernel_siboehm_v5{measure_performance(
         function_kernel_siboehm_v5, stream, num_repeats, num_warmups)};
-    std::cout << "Kernel V5 Siboehm Latency: " << latency_kernel_siboehm_v5 << " ms"
-              << std::endl;
+    std::cout << "Kernel V5 Siboehm Latency: " << latency_kernel_siboehm_v5
+              << " ms" << std::endl;
     std::cout << "Kernel V5 Siboehm Effective Bandwidth: "
               << ((m * k + k * n + m * n) * sizeof(float)) /
                      (latency_kernel_siboehm_v5 * 1e-3) / 1e9
@@ -2943,7 +3456,6 @@ int main()
               << (2.0 * m * k * n) / (latency_kernel_siboehm_v5 * 1e-3) / 1e12
               << std::endl;
     std::cout << std::endl;
-
 
     // Use kernel v6 to compute GEMM.
     // Set h_mat_c and h_mat_c_cpu to zero for GEMM.
@@ -3012,8 +3524,6 @@ int main()
     // 125 TFLOPS for GA 102 RTX 3090?
     std::cout << std::endl;
 
-
-
     // Use kernel v8 to compute GEMM.
     // Set h_mat_c and h_mat_c_cpu to zero for GEMM.
     CHECK_CUDA_ERROR(
@@ -3046,7 +3556,6 @@ int main()
               << (2.0 * m * k * n) / (latency_kernel_v8 * 1e-3) / 1e12
               << std::endl;
     std::cout << std::endl;
-
 
     // Use kernel v9 to compute GEMM.
     // Set h_mat_c and h_mat_c_cpu to zero for GEMM.
@@ -3081,7 +3590,6 @@ int main()
               << std::endl;
     std::cout << std::endl;
 
-
     __half* d_mat_a_fp16;
     __half* d_mat_b_fp16;
     __half* d_mat_c_fp16;
@@ -3092,8 +3600,9 @@ int main()
 
     // Measure the effective bandwidth.
     std::function<void(cudaStream_t)> function_kernel_v10_fp16{
-        std::bind(launch_gemm_kernel_v10<__half>, m, n, k, __float2half(alpha), d_mat_a_fp16,
-                  d_mat_b_fp16, __float2half(beta), d_mat_c_fp16, std::placeholders::_1)};
+        std::bind(launch_gemm_kernel_v10<__half>, m, n, k, __float2half(alpha),
+                  d_mat_a_fp16, d_mat_b_fp16, __float2half(beta), d_mat_c_fp16,
+                  std::placeholders::_1)};
     float const latency_kernel_v10_fp16{measure_performance(
         function_kernel_v10_fp16, stream, num_repeats, num_warmups)};
     std::cout << "Kernel V10 FP16 Latency: " << latency_kernel_v10_fp16 << " ms"
@@ -3108,15 +3617,15 @@ int main()
               << std::endl;
     std::cout << std::endl;
 
-
     // Measure the effective bandwidth.
     std::function<void(cudaStream_t)> function_kernel_v11_fp16{
-        std::bind(launch_gemm_kernel_v11<__half>, m, n, k, __float2half(alpha), d_mat_a_fp16,
-                  d_mat_b_fp16, __float2half(beta), d_mat_c_fp16, std::placeholders::_1)};
+        std::bind(launch_gemm_kernel_v11<__half>, m, n, k, __float2half(alpha),
+                  d_mat_a_fp16, d_mat_b_fp16, __float2half(beta), d_mat_c_fp16,
+                  std::placeholders::_1)};
     float const latency_kernel_v11_fp16{measure_performance(
         function_kernel_v11_fp16, stream, num_repeats, num_warmups)};
-    std::cout << "Kernel V11 FP16 Tensor Core Latency: " << latency_kernel_v11_fp16 << " ms"
-              << std::endl;
+    std::cout << "Kernel V11 FP16 Tensor Core Latency: "
+              << latency_kernel_v11_fp16 << " ms" << std::endl;
     std::cout << "Kernel V11 FP16 Tensor Core Effective Bandwidth: "
               << ((m * k + k * n + m * n) * sizeof(__half)) /
                      (latency_kernel_v11_fp16 * 1e-3) / 1e9
@@ -3127,11 +3636,8 @@ int main()
               << std::endl;
     std::cout << std::endl;
 
-
-
     CHECK_CUBLASS_ERROR(cublasDestroy(handle));
     CHECK_CUDA_ERROR(cudaStreamDestroy(stream));
-
 
     CHECK_CUDA_ERROR(cudaFree(d_mat_a));
     CHECK_CUDA_ERROR(cudaFree(d_mat_b));

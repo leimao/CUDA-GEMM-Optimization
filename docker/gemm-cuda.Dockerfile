@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libtool \
         pkg-config \
         ca-certificates \
+        locales \
+        locales-all \
         wget \
         git && \
     apt-get clean

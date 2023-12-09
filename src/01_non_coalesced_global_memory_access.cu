@@ -1,3 +1,4 @@
+#include "cuda_gemm.hpp"
 #include "cuda_gemm_utils.hpp"
 
 // GEMM kernel v0.
