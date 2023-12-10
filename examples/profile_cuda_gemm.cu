@@ -280,25 +280,29 @@ int main()
                                 cudaMemcpyDeviceToHost));
 
     float* C_host_from_device{nullptr};
-    CHECK_CUDA_ERROR(cudaMallocHost(&C_host_from_device, m * ldc * sizeof(float)));
+    CHECK_CUDA_ERROR(
+        cudaMallocHost(&C_host_from_device, m * ldc * sizeof(float)));
 
     // Launch CUDA GEMM.
     CHECK_CUDA_ERROR(cudaMemcpy(C_device, C_host, m * ldc * sizeof(float),
                                 cudaMemcpyHostToDevice));
     // Verify the correctness of CUDA GEMM.
-    launch_gemm_kernel_v00<float>(m, n, k, &alpha, A_device, lda, B_device,
-                                      ldb, &beta, C_device, ldc, stream);
+    launch_gemm_kernel_v00<float>(m, n, k, &alpha, A_device, lda, B_device, ldb,
+                                  &beta, C_device, ldc, stream);
     CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
-    CHECK_CUDA_ERROR(cudaMemcpy(C_host_from_device, C_device, m * ldc * sizeof(float),
+    CHECK_CUDA_ERROR(cudaMemcpy(C_host_from_device, C_device,
+                                m * ldc * sizeof(float),
                                 cudaMemcpyDeviceToHost));
-    assert(all_close<float>(C_host_from_device, C_host_ref, m, n, ldc, abs_tol));
+    assert(
+        all_close<float>(C_host_from_device, C_host_ref, m, n, ldc, abs_tol));
 
     // Measure the performance of CUDA GEMM.
     float const latency_cuda_gemm_v00{measure_performance<float>(
         [&](cudaStream_t stream)
         {
-            launch_gemm_kernel_v00<float>(m, n, k, &alpha, A_device, lda, B_device,
-                                      ldb, &beta, C_device, ldc, stream);
+            launch_gemm_kernel_v00<float>(m, n, k, &alpha, A_device, lda,
+                                          B_device, ldb, &beta, C_device, ldc,
+                                          stream);
             return 0.0f;
         },
         stream, num_repeats, num_warmups)};
@@ -312,8 +316,7 @@ int main()
     std::cout << "Latency: " << latency_cuda_gemm_v00 << " ms" << std::endl;
     std::cout << "Effective Bandwidth: " << effective_bandwidth_cuda_gemm_v00
               << " GB/s" << std::endl;
-    std::cout << "Effective TFLOPS: " << effective_tflops_cuda_gemm_v00 << " TFLOPS"
-              << std::endl;
+    std::cout << "Effective TFLOPS: " << effective_tflops_cuda_gemm_v00
+              << " TFLOPS" << std::endl;
     std::cout << std::endl;
-
 }

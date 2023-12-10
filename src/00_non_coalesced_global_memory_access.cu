@@ -1,16 +1,18 @@
+#include <cuda_fp16.h>
+
 #include "cuda_gemm.hpp"
 #include "cuda_gemm_utils.hpp"
 
 // GEMM kernel v00.
 // Non-coalesced read and write from global memory.
 template <typename T>
-__global__ void gemm_v00(size_t m, size_t n, size_t k, T alpha,
-                         T const* A, size_t lda, T const* B, size_t ldb,
-                         T beta, T* C, size_t ldc)
+__global__ void gemm_v00(size_t m, size_t n, size_t k, T alpha, T const* A,
+                         size_t lda, T const* B, size_t ldb, T beta, T* C,
+                         size_t ldc)
 {
     // Compute the row and column of C that this thread is responsible for.
-    size_t const C_col_idx{blockIdx.x * blockDim.x + threadIdx.x};
-    size_t const C_row_idx{blockIdx.y * blockDim.y + threadIdx.y};
+    size_t const C_row_idx{blockIdx.x * blockDim.x + threadIdx.x};
+    size_t const C_col_idx{blockIdx.y * blockDim.y + threadIdx.y};
 
     // Each thread compute
     // C[C_row_idx, C_col_idx] = alpha * A[C_row_idx, :] * B[:, C_col_idx] +
@@ -38,7 +40,7 @@ void launch_gemm_kernel_v00(size_t m, size_t n, size_t k, T const* alpha,
         (static_cast<unsigned int>(m) + block_dim.x - 1U) / block_dim.x,
         (static_cast<unsigned int>(n) + block_dim.y - 1U) / block_dim.y, 1U};
     gemm_v00<T><<<grid_dim, block_dim, 0U, stream>>>(m, n, k, *alpha, A, lda, B,
-                                                  ldb, *beta, C, ldc);
+                                                     ldb, *beta, C, ldc);
     CHECK_LAST_CUDA_ERROR();
 }
 
@@ -49,15 +51,15 @@ template void launch_gemm_kernel_v00<float>(size_t m, size_t n, size_t k,
                                             size_t ldb, float const* beta,
                                             float* C, size_t ldc,
                                             cudaStream_t stream);
-// template void launch_gemm_kernel_v00<double>(size_t m, size_t n, size_t k,
-//                                              double const* alpha,
-//                                              double const* A, size_t lda,
-//                                              double const* B, size_t ldb,
-//                                              double const* beta, double* C,
-//                                              size_t ldc, cudaStream_t stream);
-// template void launch_gemm_kernel_v00<__half>(size_t m, size_t n, size_t k,
-//                                              __half const* alpha,
-//                                              __half const* A, size_t lda,
-//                                              __half const* B, size_t ldb,
-//                                              __half const* beta, __half* C,
-//                                              size_t ldc, cudaStream_t stream);
+template void launch_gemm_kernel_v00<double>(size_t m, size_t n, size_t k,
+                                             double const* alpha,
+                                             double const* A, size_t lda,
+                                             double const* B, size_t ldb,
+                                             double const* beta, double* C,
+                                             size_t ldc, cudaStream_t stream);
+template void launch_gemm_kernel_v00<__half>(size_t m, size_t n, size_t k,
+                                             __half const* alpha,
+                                             __half const* A, size_t lda,
+                                             __half const* B, size_t ldb,
+                                             __half const* beta, __half* C,
+                                             size_t ldc, cudaStream_t stream);
