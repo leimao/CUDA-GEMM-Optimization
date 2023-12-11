@@ -1,7 +1,7 @@
 #ifndef CUDA_GEMM_HPP
 #define CUDA_GEMM_HPP
 
-// #include "cuda_gemm_utils.hpp"
+#include <cuda_runtime.h>
 
 template <typename T>
 void launch_gemm_kernel_v00(size_t m, size_t n, size_t k, T const* alpha,
