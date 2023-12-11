@@ -186,6 +186,19 @@ void random_initialize_matrix(T* A, size_t m, size_t n, size_t lda,
     }
 }
 
+void print_performance_result(size_t m, size_t n, size_t k, float latency)
+{
+    float const effective_bandwidth{
+        compute_effective_bandwidth<float>(m, n, k, latency)};
+    float const effective_tflops{compute_effective_tflops(m, n, k, latency)};
+
+    std::cout << "Latency: " << latency << " ms" << std::endl;
+    std::cout << "Effective Bandwidth: " << effective_bandwidth << " GB/s"
+              << std::endl;
+    std::cout << "Effective TFLOPS: " << effective_tflops << " TFLOPS"
+              << std::endl;
+}
+
 template <typename T,
           typename std::enable_if<std::is_same<T, float>::value ||
                                       std::is_same<T, double>::value ||
@@ -264,19 +277,6 @@ std::pair<float, float> profile_gemm(
         },
         stream, num_repeats, num_warmups)};
 
-    // float const effective_bandwidth_cublas{
-    //     compute_effective_bandwidth<T>(m, n, k, latency_cublas)};
-    // float const effective_tflops_cublas{
-    //     compute_effective_tflops(m, n, k, latency_cublas)};
-
-    // std::cout << "cuBLAS" << std::endl;
-    // std::cout << "Latency: " << latency_cublas << " ms" << std::endl;
-    // std::cout << "Effective Bandwidth: " << effective_bandwidth_cublas
-    //           << " GB/s" << std::endl;
-    // std::cout << "Effective TFLOPS: " << effective_tflops_cublas << " TFLOPS"
-    //           << std::endl;
-    // std::cout << std::endl;
-
     // Launch CUDA GEMM.
     CHECK_CUDA_ERROR(cudaMemcpy(C_device, C_host, m * ldc * sizeof(T),
                                 cudaMemcpyHostToDevice));
@@ -298,19 +298,6 @@ std::pair<float, float> profile_gemm(
         },
         stream, num_repeats, num_warmups)};
 
-    // float const effective_bandwidth_cuda_gemm{
-    //     compute_effective_bandwidth<T>(m, n, k, latency_cuda_gemm)};
-    // float const effective_tflops_cuda_gemm{
-    //     compute_effective_tflops(m, n, k, latency_cuda_gemm)};
-
-    // std::cout << "CUDA GEMM" << std::endl;
-    // std::cout << "Latency: " << latency_cuda_gemm << " ms" << std::endl;
-    // std::cout << "Effective Bandwidth: " << effective_bandwidth_cuda_gemm
-    //           << " GB/s" << std::endl;
-    // std::cout << "Effective TFLOPS: " << effective_tflops_cuda_gemm
-    //           << " TFLOPS" << std::endl;
-    // std::cout << std::endl;
-
     // Release resources.
     CHECK_CUDA_ERROR(cudaFree(A_device));
     CHECK_CUDA_ERROR(cudaFree(B_device));
@@ -323,28 +310,23 @@ std::pair<float, float> profile_gemm(
     CHECK_CUBLASS_ERROR(cublasDestroy(handle));
     CHECK_CUDA_ERROR(cudaStreamDestroy(stream));
 
+    std::cout << "cuBLAS GEMM Kernel Performance" << std::endl;
+    print_performance_result(m, n, k, latency_cublas);
+    std::cout << "Custom GEMM Kernel Performance" << std::endl;
+    print_performance_result(m, n, k, latency_cuda_gemm);
+    std::cout << "Custom GEMM VS cuBLAS GEMM Performance: "
+              << latency_cublas / latency_cuda_gemm * 100.0f << "%"
+              << std::endl;
+
     return std::pair<float, float>{latency_cublas, latency_cuda_gemm};
-}
-
-void print_performance_result(size_t m, size_t n, size_t k, float latency)
-{
-    float const effective_bandwidth{
-        compute_effective_bandwidth<float>(m, n, k, latency)};
-    float const effective_tflops{compute_effective_tflops(m, n, k, latency)};
-
-    std::cout << "Latency: " << latency << " ms" << std::endl;
-    std::cout << "Effective Bandwidth: " << effective_bandwidth << " GB/s"
-              << std::endl;
-    std::cout << "Effective TFLOPS: " << effective_tflops << " TFLOPS"
-              << std::endl;
 }
 
 int main()
 {
     print_device_info();
 
-    constexpr size_t num_repeats{10U};
-    constexpr size_t num_warmups{10U};
+    constexpr size_t num_repeats{20U};
+    constexpr size_t num_warmups{20U};
 
     // constexpr size_t m{4096U};
     // constexpr size_t k{4096U};
@@ -376,23 +358,25 @@ int main()
               << " Leading Dimension Size = " << lda << std::endl;
     std::cout << std::endl;
 
-    std::cout << "Custom GEMM Kernel V00" << std::endl;
-    std::function<void(size_t, size_t, size_t, float const*, float const*,
-                       size_t, float const*, size_t, float const*, float*,
-                       size_t, cudaStream_t)> const
-        launch_gemm_kernel_v00_function{launch_gemm_kernel_v00<float>};
-    std::pair<float, float> const gemm_kernel_v00_profile_result{
-        profile_gemm<float>(m, n, k, lda, ldb, ldc,
-                            launch_gemm_kernel_v00_function, num_repeats,
-                            num_warmups)};
-    std::cout << "cuBLAS GEMM Kernel Performance" << std::endl;
-    print_performance_result(m, n, k, gemm_kernel_v00_profile_result.first);
-    std::cout << "Custom GEMM Kernel Performance" << std::endl;
-    print_performance_result(m, n, k, gemm_kernel_v00_profile_result.second);
-    std::cout << "Custom GEMM VS cuBLAS GEMM Performance: "
-              << gemm_kernel_v00_profile_result.first /
-                     gemm_kernel_v00_profile_result.second * 100.0f
-              << "%" << std::endl;
+    // Define all the GEMM kernel launch functions to be profiled.
+    std::vector<std::pair<
+        std::string,
+        std::function<void(size_t, size_t, size_t, float const*, float const*,
+                           size_t, float const*, size_t, float const*, float*,
+                           size_t, cudaStream_t)>>> const
+        gemm_kernel_launch_functions{
+            {"Custom GEMM Kernel V00", launch_gemm_kernel_v00<float>},
+            {"Custom GEMM Kernel V01", launch_gemm_kernel_v01<float>}};
+
+    for (auto const& gemm_kernel_launch_function : gemm_kernel_launch_functions)
+    {
+        std::cout << gemm_kernel_launch_function.first << std::endl;
+        std::pair<float, float> const gemm_kernel_profile_result{
+            profile_gemm<float>(m, n, k, lda, ldb, ldc,
+                                gemm_kernel_launch_function.second, num_repeats,
+                                num_warmups)};
+        std::cout << std::endl;
+    }
 
     return 0;
 }
