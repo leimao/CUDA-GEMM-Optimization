@@ -21,6 +21,7 @@ add_library(
     02_2d_block_tiling.cu
     03_2d_block_tiling_1d_thread_tiling.cu
     04_2d_block_tiling_2d_thread_tiling.cu
+    05_2d_block_tiling_2d_thread_tiling_vectorized_memory_access.cu
 )
 # add_library(gemm SHARED ${CMAKE_CURRENT_SOURCE_DIR})
 
