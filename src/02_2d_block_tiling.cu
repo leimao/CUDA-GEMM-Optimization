@@ -61,12 +61,19 @@ __global__ void gemm_v02(size_t m, size_t n, size_t k, T alpha, T const* A,
             {
                 val = A[A_row_idx * lda + A_col_idx];
             }
-            if (A_thread_block_tile_row_idx < BLOCK_TILE_SIZE_Y &&
-                A_thread_block_tile_col_idx < BLOCK_TILE_SIZE_K)
-            {
-                A_thread_block_tile[A_thread_block_tile_row_idx]
-                                   [A_thread_block_tile_col_idx] = val;
-            }
+            // This if will slow down the kernel.
+            // Add static asserts from the host code to guarantee this if is
+            // always true.
+            static_assert(BLOCK_TILE_SIZE_K * BLOCK_TILE_SIZE_Y % NUM_THREADS ==
+                          0U);
+            // if (A_thread_block_tile_row_idx < BLOCK_TILE_SIZE_Y &&
+            //     A_thread_block_tile_col_idx < BLOCK_TILE_SIZE_K)
+            // {
+            //     A_thread_block_tile[A_thread_block_tile_row_idx]
+            //                        [A_thread_block_tile_col_idx] = val;
+            // }
+            A_thread_block_tile[A_thread_block_tile_row_idx]
+                               [A_thread_block_tile_col_idx] = val;
         }
 // Load data from B on DRAM to B_thread_block_tile on shared memory.
 #pragma unroll
@@ -95,12 +102,19 @@ __global__ void gemm_v02(size_t m, size_t n, size_t k, T alpha, T const* A,
             {
                 val = B[B_row_idx * ldb + B_col_idx];
             }
-            if (B_thread_block_tile_row_idx < BLOCK_TILE_SIZE_K &&
-                B_thread_block_tile_col_idx < BLOCK_TILE_SIZE_X)
-            {
-                B_thread_block_tile[B_thread_block_tile_row_idx]
-                                   [B_thread_block_tile_col_idx] = val;
-            }
+            // This if will slow down the kernel.
+            // Add static asserts from the host code to guarantee this if is
+            // always true.
+            static_assert(BLOCK_TILE_SIZE_X * BLOCK_TILE_SIZE_K % NUM_THREADS ==
+                          0U);
+            // if (B_thread_block_tile_row_idx < BLOCK_TILE_SIZE_K &&
+            //     B_thread_block_tile_col_idx < BLOCK_TILE_SIZE_X)
+            // {
+            //     B_thread_block_tile[B_thread_block_tile_row_idx]
+            //                        [B_thread_block_tile_col_idx] = val;
+            // }
+            B_thread_block_tile[B_thread_block_tile_row_idx]
+                               [B_thread_block_tile_col_idx] = val;
         }
         __syncthreads();
 
@@ -140,6 +154,9 @@ void launch_gemm_kernel_v02(size_t m, size_t n, size_t k, T const* alpha,
     constexpr unsigned int BLOCK_TILE_SIZE_X{32U};
     constexpr unsigned int BLOCK_TILE_SIZE_Y{32U};
     constexpr unsigned int BLOCK_TILE_SIZE_K{32U};
+    constexpr unsigned int NUM_THREADS{BLOCK_TILE_SIZE_X * BLOCK_TILE_SIZE_Y};
+    static_assert(BLOCK_TILE_SIZE_K * BLOCK_TILE_SIZE_Y % NUM_THREADS == 0U);
+    static_assert(BLOCK_TILE_SIZE_X * BLOCK_TILE_SIZE_K % NUM_THREADS == 0U);
     dim3 const block_dim{BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, 1U};
     dim3 const grid_dim{
         (static_cast<unsigned int>(n) + block_dim.x - 1U) / block_dim.x,
