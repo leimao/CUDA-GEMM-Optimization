@@ -336,13 +336,17 @@ int main()
     constexpr size_t k{2048U};
     constexpr size_t n{2048U};
 
+    // constexpr size_t m{1372U};
+    // constexpr size_t k{1153U};
+    // constexpr size_t n{2171U};
+
     // constexpr size_t lda{m};
     // constexpr size_t ldb{k};
     // constexpr size_t ldc{n};
 
-    constexpr size_t lda{(m + 16U - 1U) / 16U * 16U};
-    constexpr size_t ldb{(k + 16U - 1U) / 16U * 16U};
-    constexpr size_t ldc{(m + 16U - 1U) / 16U * 16U};
+    constexpr size_t lda{(k + 16U - 1U) / 16U * 16U};
+    constexpr size_t ldb{(n + 16U - 1U) / 16U * 16U};
+    constexpr size_t ldc{(n + 16U - 1U) / 16U * 16U};
 
     static_assert(lda >= k);
     static_assert(ldb >= n);
@@ -366,7 +370,8 @@ int main()
                            size_t, cudaStream_t)>>> const
         gemm_kernel_launch_functions{
             {"Custom GEMM Kernel V00", launch_gemm_kernel_v00<float>},
-            {"Custom GEMM Kernel V01", launch_gemm_kernel_v01<float>}};
+            {"Custom GEMM Kernel V01", launch_gemm_kernel_v01<float>},
+            {"Custom GEMM Kernel V02", launch_gemm_kernel_v02<float>}};
 
     for (auto const& gemm_kernel_launch_function : gemm_kernel_launch_functions)
     {

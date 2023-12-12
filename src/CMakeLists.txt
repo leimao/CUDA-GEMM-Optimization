@@ -12,7 +12,14 @@ find_path(CUDA_GEMM_INCLUDE_DIRS cuda_gemm_utils.hpp HINTS ${CMAKE_SOURCE_DIR}/i
 file(GLOB CUDA_GEMM_HEADERS ${CMAKE_SOURCE_DIR}/include/*.hpp)
 
 # Add all the source files in the current directory to build the library
-add_library(cuda_gemm SHARED cuda_gemm_utils.cu 00_non_coalesced_global_memory_access.cu 01_coalesced_global_memory_access.cu)
+add_library(
+    cuda_gemm 
+    SHARED 
+    cuda_gemm_utils.cu 
+    00_non_coalesced_global_memory_access.cu
+    01_coalesced_global_memory_access.cu
+    02_shared_memory_cache.cu
+)
 # add_library(gemm SHARED ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Add the include directory of the library to the include directories of the project
