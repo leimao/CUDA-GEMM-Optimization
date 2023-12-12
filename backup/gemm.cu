@@ -3598,43 +3598,46 @@ int main()
     CHECK_CUDA_ERROR(cudaMalloc(&d_mat_b_fp16, k * n * sizeof(__half)));
     CHECK_CUDA_ERROR(cudaMalloc(&d_mat_c_fp16, m * n * sizeof(__half)));
 
-    // Measure the effective bandwidth.
-    std::function<void(cudaStream_t)> function_kernel_v10_fp16{
-        std::bind(launch_gemm_kernel_v10<__half>, m, n, k, __float2half(alpha),
-                  d_mat_a_fp16, d_mat_b_fp16, __float2half(beta), d_mat_c_fp16,
-                  std::placeholders::_1)};
-    float const latency_kernel_v10_fp16{measure_performance(
-        function_kernel_v10_fp16, stream, num_repeats, num_warmups)};
-    std::cout << "Kernel V10 FP16 Latency: " << latency_kernel_v10_fp16 << " ms"
-              << std::endl;
-    std::cout << "Kernel V10 FP16 Effective Bandwidth: "
-              << ((m * k + k * n + m * n) * sizeof(__half)) /
-                     (latency_kernel_v10_fp16 * 1e-3) / 1e9
-              << " GB/s" << std::endl;
-    // Compute the TFLOPS.
-    std::cout << "Kernel V10 FP16 TFLOPS: "
-              << (2.0 * m * k * n) / (latency_kernel_v10_fp16 * 1e-3) / 1e12
-              << std::endl;
-    std::cout << std::endl;
+    // // Measure the effective bandwidth.
+    // std::function<void(cudaStream_t)> function_kernel_v10_fp16{
+    //     std::bind(launch_gemm_kernel_v10<__half>, m, n, k,
+    //     __float2half(alpha),
+    //               d_mat_a_fp16, d_mat_b_fp16, __float2half(beta),
+    //               d_mat_c_fp16, std::placeholders::_1)};
+    // float const latency_kernel_v10_fp16{measure_performance(
+    //     function_kernel_v10_fp16, stream, num_repeats, num_warmups)};
+    // std::cout << "Kernel V10 FP16 Latency: " << latency_kernel_v10_fp16 << "
+    // ms"
+    //           << std::endl;
+    // std::cout << "Kernel V10 FP16 Effective Bandwidth: "
+    //           << ((m * k + k * n + m * n) * sizeof(__half)) /
+    //                  (latency_kernel_v10_fp16 * 1e-3) / 1e9
+    //           << " GB/s" << std::endl;
+    // // Compute the TFLOPS.
+    // std::cout << "Kernel V10 FP16 TFLOPS: "
+    //           << (2.0 * m * k * n) / (latency_kernel_v10_fp16 * 1e-3) / 1e12
+    //           << std::endl;
+    // std::cout << std::endl;
 
-    // Measure the effective bandwidth.
-    std::function<void(cudaStream_t)> function_kernel_v11_fp16{
-        std::bind(launch_gemm_kernel_v11<__half>, m, n, k, __float2half(alpha),
-                  d_mat_a_fp16, d_mat_b_fp16, __float2half(beta), d_mat_c_fp16,
-                  std::placeholders::_1)};
-    float const latency_kernel_v11_fp16{measure_performance(
-        function_kernel_v11_fp16, stream, num_repeats, num_warmups)};
-    std::cout << "Kernel V11 FP16 Tensor Core Latency: "
-              << latency_kernel_v11_fp16 << " ms" << std::endl;
-    std::cout << "Kernel V11 FP16 Tensor Core Effective Bandwidth: "
-              << ((m * k + k * n + m * n) * sizeof(__half)) /
-                     (latency_kernel_v11_fp16 * 1e-3) / 1e9
-              << " GB/s" << std::endl;
-    // Compute the TFLOPS.
-    std::cout << "Kernel V11 FP16 Tensor Core TFLOPS: "
-              << (2.0 * m * k * n) / (latency_kernel_v11_fp16 * 1e-3) / 1e12
-              << std::endl;
-    std::cout << std::endl;
+    // // Measure the effective bandwidth.
+    // std::function<void(cudaStream_t)> function_kernel_v11_fp16{
+    //     std::bind(launch_gemm_kernel_v11<__half>, m, n, k,
+    //     __float2half(alpha),
+    //               d_mat_a_fp16, d_mat_b_fp16, __float2half(beta),
+    //               d_mat_c_fp16, std::placeholders::_1)};
+    // float const latency_kernel_v11_fp16{measure_performance(
+    //     function_kernel_v11_fp16, stream, num_repeats, num_warmups)};
+    // std::cout << "Kernel V11 FP16 Tensor Core Latency: "
+    //           << latency_kernel_v11_fp16 << " ms" << std::endl;
+    // std::cout << "Kernel V11 FP16 Tensor Core Effective Bandwidth: "
+    //           << ((m * k + k * n + m * n) * sizeof(__half)) /
+    //                  (latency_kernel_v11_fp16 * 1e-3) / 1e9
+    //           << " GB/s" << std::endl;
+    // // Compute the TFLOPS.
+    // std::cout << "Kernel V11 FP16 Tensor Core TFLOPS: "
+    //           << (2.0 * m * k * n) / (latency_kernel_v11_fp16 * 1e-3) / 1e12
+    //           << std::endl;
+    // std::cout << std::endl;
 
     CHECK_CUBLASS_ERROR(cublasDestroy(handle));
     CHECK_CUDA_ERROR(cudaStreamDestroy(stream));

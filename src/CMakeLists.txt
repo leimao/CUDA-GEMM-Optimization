@@ -18,7 +18,9 @@ add_library(
     cuda_gemm_utils.cu 
     00_non_coalesced_global_memory_access.cu
     01_coalesced_global_memory_access.cu
-    02_shared_memory_cache.cu
+    02_2d_block_tiling.cu
+    03_2d_block_tiling_1d_thread_tiling.cu
+    04_2d_block_tiling_2d_thread_tiling.cu
 )
 # add_library(gemm SHARED ${CMAKE_CURRENT_SOURCE_DIR})
 

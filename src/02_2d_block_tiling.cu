@@ -11,6 +11,10 @@ __global__ void gemm_v02(size_t m, size_t n, size_t k, T alpha, T const* A,
                          size_t lda, T const* B, size_t ldb, T beta, T* C,
                          size_t ldc)
 {
+    // Avoid using blockDim.x * blockDim.y as the number of threads per block.
+    // Because it is a runtime constant and the compiler cannot optimize the
+    // loop unrolling based on that.
+    // Use a compile time constant instead.
     constexpr size_t NUM_THREADS{BLOCK_TILE_SIZE_X * BLOCK_TILE_SIZE_Y};
     size_t const thread_linear_idx{threadIdx.y * blockDim.x + threadIdx.x};
 
@@ -30,9 +34,12 @@ __global__ void gemm_v02(size_t m, size_t n, size_t k, T alpha, T const* A,
          thread_block_tile_idx < num_thread_block_tiles;
          ++thread_block_tile_idx)
     {
-        // Load data from A on DRAM to A_thread_block_tile on shared memory.
+// Load data from A on DRAM to A_thread_block_tile on shared memory.
+#pragma unroll
         for (size_t load_idx{0U};
-             load_idx < (BLOCK_TILE_SIZE_Y * BLOCK_TILE_SIZE_K + NUM_THREADS - 1) / NUM_THREADS;
+             load_idx <
+             (BLOCK_TILE_SIZE_Y * BLOCK_TILE_SIZE_K + NUM_THREADS - 1U) /
+                 NUM_THREADS;
              ++load_idx)
         {
             size_t const A_thread_block_tile_row_idx{
@@ -61,9 +68,12 @@ __global__ void gemm_v02(size_t m, size_t n, size_t k, T alpha, T const* A,
                                    [A_thread_block_tile_col_idx] = val;
             }
         }
-        // Load data from B on DRAM to B_thread_block_tile on shared memory.
+// Load data from B on DRAM to B_thread_block_tile on shared memory.
+#pragma unroll
         for (size_t load_idx{0U};
-             load_idx < (BLOCK_TILE_SIZE_K * BLOCK_TILE_SIZE_X + NUM_THREADS - 1) / NUM_THREADS;
+             load_idx <
+             (BLOCK_TILE_SIZE_K * BLOCK_TILE_SIZE_X + NUM_THREADS - 1U) /
+                 NUM_THREADS;
              ++load_idx)
         {
             size_t const B_thread_block_tile_row_idx{
@@ -94,6 +104,7 @@ __global__ void gemm_v02(size_t m, size_t n, size_t k, T alpha, T const* A,
         }
         __syncthreads();
 
+#pragma unroll
         for (size_t k_i{0U}; k_i < BLOCK_TILE_SIZE_K; ++k_i)
         {
             // Doing this reulst in 2 TOPS.
