@@ -328,17 +328,17 @@ int main()
     constexpr size_t num_repeats{20U};
     constexpr size_t num_warmups{20U};
 
-    constexpr size_t m{4096U};
-    constexpr size_t k{4096U};
-    constexpr size_t n{4096U};
+    // constexpr size_t m{4096U};
+    // constexpr size_t k{4096U};
+    // constexpr size_t n{4096U};
 
     // constexpr size_t m{2048U};
     // constexpr size_t k{2048U};
     // constexpr size_t n{2048U};
 
-    // constexpr size_t m{1372U};
-    // constexpr size_t k{1153U};
-    // constexpr size_t n{2171U};
+    constexpr size_t m{1372U};
+    constexpr size_t k{1153U};
+    constexpr size_t n{2171U};
 
     // constexpr size_t lda{m};
     // constexpr size_t ldb{k};
@@ -379,7 +379,10 @@ int main()
              launch_gemm_kernel_v03_vectorized<float>},
             {"Custom GEMM Kernel V04", launch_gemm_kernel_v04<float>},
             {"Custom GEMM Kernel V04 Vectorized",
-             launch_gemm_kernel_v04_vectorized<float>}};
+             launch_gemm_kernel_v04_vectorized<float>},
+            {"Custom GEMM Kernel V05", launch_gemm_kernel_v05<float>},
+            {"Custom GEMM Kernel V05 Vectorized",
+             launch_gemm_kernel_v05_vectorized<float>}};
 
     for (auto const& gemm_kernel_launch_function : gemm_kernel_launch_functions)
     {

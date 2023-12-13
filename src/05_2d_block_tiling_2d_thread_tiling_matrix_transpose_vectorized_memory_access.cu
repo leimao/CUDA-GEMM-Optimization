@@ -3,12 +3,12 @@
 #include "cuda_gemm.hpp"
 #include "cuda_gemm_utils.hpp"
 
-// GEMM kernel v04.
+// GEMM kernel v05.
 // Coalesced read and write from global memory.
 template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
           size_t BLOCK_TILE_SIZE_K, size_t THREAD_TILE_SIZE_X,
           size_t THREAD_TILE_SIZE_Y>
-__global__ void gemm_v04_vectorized(size_t m, size_t n, size_t k, T alpha,
+__global__ void gemm_v05_vectorized(size_t m, size_t n, size_t k, T alpha,
                                     T const* A, size_t lda, T const* B,
                                     size_t ldb, T beta, T* C, size_t ldc)
 {
@@ -21,7 +21,8 @@ __global__ void gemm_v04_vectorized(size_t m, size_t n, size_t k, T alpha,
     size_t const thread_linear_idx{threadIdx.y * blockDim.x + threadIdx.x};
 
     // Cache a tile of A and B in shared memory for data reuse.
-    __shared__ T A_thread_block_tile[BLOCK_TILE_SIZE_Y][BLOCK_TILE_SIZE_K];
+    __shared__ T
+        A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_Y];
     __shared__ T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X];
 
     size_t const num_thread_block_tiles{(k + BLOCK_TILE_SIZE_K - 1) /
@@ -109,10 +110,13 @@ __global__ void gemm_v04_vectorized(size_t m, size_t n, size_t k, T alpha,
             if (A_thread_block_tile_row_idx < BLOCK_TILE_SIZE_Y &&
                 A_thread_block_tile_col_idx < BLOCK_TILE_SIZE_K)
             {
-                *reinterpret_cast<int4*>(
-                    &A_thread_block_tile[A_thread_block_tile_row_idx]
-                                        [A_thread_block_tile_col_idx]) =
-                    A_row_vector_vals;
+                for (size_t i{0U}; i < NUM_VECTOR_UNITS; ++i)
+                {
+                    A_thread_block_tile_transposed
+                        [A_thread_block_tile_col_idx + i]
+                        [A_thread_block_tile_row_idx] =
+                            reinterpret_cast<T const*>(&A_row_vector_vals)[i];
+                }
             }
         }
 // Load data from B on DRAM to B_thread_block_tile on shared memory.
@@ -185,14 +189,10 @@ __global__ void gemm_v04_vectorized(size_t m, size_t n, size_t k, T alpha,
                  thread_tile_row_idx < THREAD_TILE_SIZE_Y;
                  ++thread_tile_row_idx)
             {
-                // There will be shared memory bank conflicts accessing the
-                // values from A_thread_block_tile. We can do it better by
-                // transposing the A_thread_block_tile when we load the data
-                // from DRAM.
                 A_vals[thread_tile_row_idx] =
-                    A_thread_block_tile[A_thread_block_tile_row_idx +
-                                        thread_tile_row_idx]
-                                       [A_thread_block_tile_col_idx];
+                    A_thread_block_tile_transposed[A_thread_block_tile_col_idx]
+                                                  [A_thread_block_tile_row_idx +
+                                                   thread_tile_row_idx];
             }
 
             size_t const B_thread_block_tile_row_idx{k_i};
@@ -281,7 +281,7 @@ __global__ void gemm_v04_vectorized(size_t m, size_t n, size_t k, T alpha,
 }
 
 template <typename T>
-void launch_gemm_kernel_v04_vectorized(size_t m, size_t n, size_t k,
+void launch_gemm_kernel_v05_vectorized(size_t m, size_t n, size_t k,
                                        T const* alpha, T const* A, size_t lda,
                                        T const* B, size_t ldb, T const* beta,
                                        T* C, size_t ldc, cudaStream_t stream)
@@ -312,7 +312,7 @@ void launch_gemm_kernel_v04_vectorized(size_t m, size_t n, size_t k,
         (static_cast<unsigned int>(m) + BLOCK_TILE_SIZE_Y - 1U) /
             BLOCK_TILE_SIZE_Y,
         1U};
-    gemm_v04_vectorized<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y,
+    gemm_v05_vectorized<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y,
                         BLOCK_TILE_SIZE_K, THREAD_TILE_SIZE_X,
                         THREAD_TILE_SIZE_Y>
         <<<grid_dim, block_dim, 0U, stream>>>(m, n, k, *alpha, A, lda, B, ldb,
@@ -321,15 +321,15 @@ void launch_gemm_kernel_v04_vectorized(size_t m, size_t n, size_t k,
 }
 
 // Explicit instantiation.
-template void launch_gemm_kernel_v04_vectorized<float>(
+template void launch_gemm_kernel_v05_vectorized<float>(
     size_t m, size_t n, size_t k, float const* alpha, float const* A,
     size_t lda, float const* B, size_t ldb, float const* beta, float* C,
     size_t ldc, cudaStream_t stream);
-template void launch_gemm_kernel_v04_vectorized<double>(
+template void launch_gemm_kernel_v05_vectorized<double>(
     size_t m, size_t n, size_t k, double const* alpha, double const* A,
     size_t lda, double const* B, size_t ldb, double const* beta, double* C,
     size_t ldc, cudaStream_t stream);
-template void launch_gemm_kernel_v04_vectorized<__half>(
+template void launch_gemm_kernel_v05_vectorized<__half>(
     size_t m, size_t n, size_t k, __half const* alpha, __half const* A,
     size_t lda, __half const* B, size_t ldb, __half const* beta, __half* C,
     size_t ldc, cudaStream_t stream);
