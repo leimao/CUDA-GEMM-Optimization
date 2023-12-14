@@ -114,7 +114,7 @@ void launch_gemm_cublas(size_t m, size_t n, size_t k, T const* alpha,
 
 template <typename T>
 bool all_close(T const* C, T const* C_ref, size_t m, size_t n, size_t ldc,
-               T abs_tol)
+               T abs_tol, double rel_tol)
 {
     bool status{true};
     for (size_t i{0U}; i < m; ++i)
@@ -125,10 +125,19 @@ bool all_close(T const* C, T const* C_ref, size_t m, size_t n, size_t ldc,
             double const C_ref_val{static_cast<double>(C_ref[i * ldc + j])};
             double const diff{C_val - C_ref_val};
             double const diff_val{std::abs(diff)};
-            if (diff_val > static_cast<double>(abs_tol))
+            if (diff_val >
+                std::max(static_cast<double>(abs_tol),
+                         static_cast<double>(std::abs(C_ref_val)) * rel_tol))
             {
                 std::cout << "C[" << i << ", " << j << "] = " << C_val
                           << " C_ref[" << i << ", " << j << "] = " << C_ref_val
+                          << " Abs Diff: " << diff_val
+                          << " Abs Diff Threshold: "
+                          << static_cast<double>(abs_tol)
+                          << " Rel->Abs Diff Threshold: "
+                          << static_cast<double>(
+                                 static_cast<double>(std::abs(C_ref_val)) *
+                                 rel_tol)
                           << std::endl;
                 status = false;
                 return status;
@@ -175,7 +184,10 @@ void random_initialize_matrix(T* A, size_t m, size_t n, size_t lda,
                               unsigned int seed = 0U)
 {
     std::mt19937 gen(seed);
-    std::uniform_real_distribution<double> dis(0.0, 1.0);
+    // std::uniform_real_distribution<double> dis(0.0, 1.0);
+    // auto const rand = [&dis, &gen]() { return dis(gen); };
+    // The best way to verify is to use integer values.
+    std::uniform_int_distribution<int> dis(0, 10);
     auto const rand = [&dis, &gen]() { return dis(gen); };
     for (size_t i{0U}; i < m; ++i)
     {
@@ -214,7 +226,8 @@ std::pair<float, float> profile_gemm(
     T const alpha{static_cast<T>(1.0)};
     T const beta{static_cast<T>(0.0)};
 
-    T const abs_tol{static_cast<T>(1.0e-2)};
+    T const abs_tol{static_cast<T>(1.0e-4)};
+    double const rel_tol{0.0e-4};
 
     // Create CUDA stream.
     cudaStream_t stream;
@@ -286,7 +299,8 @@ std::pair<float, float> profile_gemm(
     CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
     CHECK_CUDA_ERROR(cudaMemcpy(C_host_from_device, C_device,
                                 m * ldc * sizeof(T), cudaMemcpyDeviceToHost));
-    assert(all_close<T>(C_host_from_device, C_host_ref, m, n, ldc, abs_tol));
+    assert(all_close<T>(C_host_from_device, C_host_ref, m, n, ldc, abs_tol,
+                        rel_tol));
 
     float const latency_cuda_gemm{measure_performance<T>(
         [&](cudaStream_t stream)
@@ -328,17 +342,21 @@ int main()
     constexpr size_t num_repeats{20U};
     constexpr size_t num_warmups{20U};
 
-    // constexpr size_t m{4096U};
-    // constexpr size_t k{4096U};
-    // constexpr size_t n{4096U};
+    constexpr size_t m{4096U};
+    constexpr size_t k{4096U};
+    constexpr size_t n{4096U};
 
     // constexpr size_t m{2048U};
     // constexpr size_t k{2048U};
     // constexpr size_t n{2048U};
 
-    constexpr size_t m{1372U};
-    constexpr size_t k{1153U};
-    constexpr size_t n{2171U};
+    // constexpr size_t m{256U};
+    // constexpr size_t k{256U};
+    // constexpr size_t n{256U};
+
+    // constexpr size_t m{1372U};
+    // constexpr size_t k{1153U};
+    // constexpr size_t n{2171U};
 
     // constexpr size_t lda{m};
     // constexpr size_t ldb{k};
@@ -357,9 +375,9 @@ int main()
     std::cout << "Matrix A: " << m << " x " << k
               << " Leading Dimension Size = " << lda << std::endl;
     std::cout << "Matrix B: " << k << " x " << n
-              << " Leading Dimension Size = " << lda << std::endl;
+              << " Leading Dimension Size = " << ldb << std::endl;
     std::cout << "Matrix C: " << m << " x " << n
-              << " Leading Dimension Size = " << lda << std::endl;
+              << " Leading Dimension Size = " << ldc << std::endl;
     std::cout << std::endl;
 
     // Define all the GEMM kernel launch functions to be profiled.
@@ -382,7 +400,8 @@ int main()
              launch_gemm_kernel_v04_vectorized<float>},
             {"Custom GEMM Kernel V05", launch_gemm_kernel_v05<float>},
             {"Custom GEMM Kernel V05 Vectorized",
-             launch_gemm_kernel_v05_vectorized<float>}};
+             launch_gemm_kernel_v05_vectorized<float>},
+            {"Custom GEMM Kernel V06", launch_gemm_kernel_v06<float>}};
 
     for (auto const& gemm_kernel_launch_function : gemm_kernel_launch_functions)
     {
