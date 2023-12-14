@@ -3220,7 +3220,7 @@ int main()
     float const alpha{1.0f};
     float const beta{0.0f};
 
-    float const abs_err_tol{10};
+    float const abs_err_tol{1.0};
 
     cudaStream_t stream;
     CHECK_CUDA_ERROR(cudaStreamCreate(&stream));

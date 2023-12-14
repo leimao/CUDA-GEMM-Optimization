@@ -228,7 +228,7 @@ void launch_gemm_kernel_v04(size_t m, size_t n, size_t k, T const* alpha,
     // The algorithm correctness should always be guaranteed.
     constexpr unsigned int BLOCK_TILE_SIZE_X{128U};
     constexpr unsigned int BLOCK_TILE_SIZE_Y{128U};
-    constexpr unsigned int BLOCK_TILE_SIZE_K{8U};
+    constexpr unsigned int BLOCK_TILE_SIZE_K{16U};
     // Each thread computes THREAD_TILE_SIZE_X * THREAD_TILE_SIZE_Y values of C.
     constexpr unsigned int THREAD_TILE_SIZE_X{8U};
     constexpr unsigned int THREAD_TILE_SIZE_Y{8U};

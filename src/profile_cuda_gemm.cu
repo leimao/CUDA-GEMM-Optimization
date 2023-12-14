@@ -183,12 +183,12 @@ template <typename T,
 void random_initialize_matrix(T* A, size_t m, size_t n, size_t lda,
                               unsigned int seed = 0U)
 {
-    std::mt19937 gen(seed);
+    std::default_random_engine eng(seed);
     // std::uniform_real_distribution<double> dis(0.0, 1.0);
     // auto const rand = [&dis, &gen]() { return dis(gen); };
     // The best way to verify is to use integer values.
     std::uniform_int_distribution<int> dis(0, 10);
-    auto const rand = [&dis, &gen]() { return dis(gen); };
+    auto const rand = [&dis, &eng]() { return dis(eng); };
     for (size_t i{0U}; i < m; ++i)
     {
         for (size_t j{0U}; j < n; ++j)
@@ -342,9 +342,9 @@ int main()
     constexpr size_t num_repeats{20U};
     constexpr size_t num_warmups{20U};
 
-    constexpr size_t m{4096U};
-    constexpr size_t k{4096U};
-    constexpr size_t n{4096U};
+    // constexpr size_t m{4096U};
+    // constexpr size_t k{4096U};
+    // constexpr size_t n{4096U};
 
     // constexpr size_t m{2048U};
     // constexpr size_t k{2048U};
@@ -354,9 +354,9 @@ int main()
     // constexpr size_t k{256U};
     // constexpr size_t n{256U};
 
-    // constexpr size_t m{1372U};
-    // constexpr size_t k{1153U};
-    // constexpr size_t n{2171U};
+    constexpr size_t m{1372U};
+    constexpr size_t k{1153U};
+    constexpr size_t n{2171U};
 
     // constexpr size_t lda{m};
     // constexpr size_t ldb{k};
@@ -401,7 +401,9 @@ int main()
             {"Custom GEMM Kernel V05", launch_gemm_kernel_v05<float>},
             {"Custom GEMM Kernel V05 Vectorized",
              launch_gemm_kernel_v05_vectorized<float>},
-            {"Custom GEMM Kernel V06", launch_gemm_kernel_v06<float>}};
+            {"Custom GEMM Kernel V06", launch_gemm_kernel_v06<float>},
+            {"Custom GEMM Kernel V06 Vectorized",
+             launch_gemm_kernel_v06_vectorized<float>}};
 
     for (auto const& gemm_kernel_launch_function : gemm_kernel_launch_functions)
     {
