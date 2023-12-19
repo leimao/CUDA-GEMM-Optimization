@@ -32,17 +32,6 @@ __global__ void gemm_v02_vectorized(size_t m, size_t n, size_t k, T alpha,
     size_t const num_thread_block_tiles{(k + BLOCK_TILE_SIZE_K - 1) /
                                         BLOCK_TILE_SIZE_K};
 
-    constexpr size_t NUM_VECTOR_UNITS{sizeof(int4) / sizeof(T)};
-    static_assert(sizeof(int4) % sizeof(T) == 0U);
-    static_assert(BLOCK_TILE_SIZE_K % NUM_VECTOR_UNITS == 0U);
-    static_assert(BLOCK_TILE_SIZE_X % NUM_VECTOR_UNITS == 0U);
-    // constexpr size_t VECTORIZED_BLOCK_TILE_SIZE_K{BLOCK_TILE_SIZE_K /
-    //                                               NUM_VECTOR_UNITS};
-    static_assert(BLOCK_TILE_SIZE_K % NUM_VECTOR_UNITS == 0U);
-    // constexpr size_t VECTORIZED_BLOCK_TILE_SIZE_X{BLOCK_TILE_SIZE_X /
-    //                                               NUM_VECTOR_UNITS};
-    static_assert(BLOCK_TILE_SIZE_X % NUM_VECTOR_UNITS == 0U);
-
     T sum{static_cast<T>(0)};
     for (size_t thread_block_tile_idx{0U};
          thread_block_tile_idx < num_thread_block_tiles;

@@ -2,6 +2,8 @@
 
 #include <cuda_runtime.h>
 
+#include "cuda_gemm_utils.hpp"
+
 void check_cuda(cudaError_t err, const char* const func, const char* const file,
                 const int line)
 {

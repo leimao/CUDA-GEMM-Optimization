@@ -270,8 +270,7 @@ __device__ void load_data_to_shared_memory_vectorized(T const* A, size_t lda,
         }
         // If this is true, the following if can be removed.
         // static_assert(VECTORIZED_BLOCK_TILE_SIZE_K * BLOCK_TILE_SIZE_Y %
-        // NUM_THREADS ==
-        //               0U);
+        // NUM_THREADS == 0U);
         if (A_thread_block_tile_row_idx < BLOCK_TILE_SIZE_Y &&
             A_thread_block_tile_col_idx < BLOCK_TILE_SIZE_K)
         {
