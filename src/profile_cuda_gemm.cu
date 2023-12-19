@@ -224,7 +224,7 @@ std::pair<float, float> profile_gemm(
     size_t num_repeats = 10, size_t num_warmups = 10, unsigned int seed = 0U)
 {
     T const alpha{static_cast<T>(1.0)};
-    T const beta{static_cast<T>(0.0)};
+    T const beta{static_cast<T>(1.0)};
 
     T const abs_tol{static_cast<T>(1.0e-4)};
     double const rel_tol{0.0e-4};
@@ -342,9 +342,9 @@ int main()
     constexpr size_t num_repeats{20U};
     constexpr size_t num_warmups{20U};
 
-    // constexpr size_t m{4096U};
-    // constexpr size_t k{4096U};
-    // constexpr size_t n{4096U};
+    constexpr size_t m{4096U};
+    constexpr size_t k{4096U};
+    constexpr size_t n{4096U};
 
     // constexpr size_t m{2048U};
     // constexpr size_t k{2048U};
@@ -354,9 +354,9 @@ int main()
     // constexpr size_t k{256U};
     // constexpr size_t n{256U};
 
-    constexpr size_t m{1372U};
-    constexpr size_t k{1153U};
-    constexpr size_t n{2171U};
+    // constexpr size_t m{1372U};
+    // constexpr size_t k{1153U};
+    // constexpr size_t n{2171U};
 
     // constexpr size_t lda{m};
     // constexpr size_t ldb{k};
@@ -414,6 +414,42 @@ int main()
                                 num_warmups)};
         std::cout << std::endl;
     }
+
+    // std::vector<std::pair<
+    //     std::string,
+    //     std::function<void(size_t, size_t, size_t, __half const*, __half
+    //     const*,
+    //                        size_t, __half const*, size_t, __half const*,
+    //                        __half*, size_t, cudaStream_t)>>> const
+    //     gemm_fp16_kernel_launch_functions{
+    //         {"Custom GEMM Kernel V00", launch_gemm_kernel_v00<__half>},
+    //         {"Custom GEMM Kernel V01", launch_gemm_kernel_v01<__half>},
+    //         {"Custom GEMM Kernel V02", launch_gemm_kernel_v02<__half>},
+    //         {"Custom GEMM Kernel V02 Vectorized",
+    //          launch_gemm_kernel_v02_vectorized<__half>},
+    //         {"Custom GEMM Kernel V03", launch_gemm_kernel_v03<__half>},
+    //         {"Custom GEMM Kernel V03 Vectorized",
+    //          launch_gemm_kernel_v03_vectorized<__half>},
+    //         {"Custom GEMM Kernel V04", launch_gemm_kernel_v04<__half>},
+    //         {"Custom GEMM Kernel V04 Vectorized",
+    //          launch_gemm_kernel_v04_vectorized<__half>},
+    //         {"Custom GEMM Kernel V05", launch_gemm_kernel_v05<__half>},
+    //         {"Custom GEMM Kernel V05 Vectorized",
+    //          launch_gemm_kernel_v05_vectorized<__half>},
+    //         {"Custom GEMM Kernel V06", launch_gemm_kernel_v06<__half>},
+    //         {"Custom GEMM Kernel V06 Vectorized",
+    //          launch_gemm_kernel_v06_vectorized<__half>}};
+
+    // for (auto const& gemm_fp16_kernel_launch_function :
+    // gemm_fp16_kernel_launch_functions)
+    // {
+    //     std::cout << gemm_fp16_kernel_launch_function.first << std::endl;
+    //     std::pair<__half, __half> const gemm_kernel_profile_result{
+    //         profile_gemm<__half>(m, n, k, lda, ldb, ldc,
+    //                             gemm_fp16_kernel_launch_function.second,
+    //                             num_repeats, num_warmups)};
+    //     std::cout << std::endl;
+    // }
 
     return 0;
 }

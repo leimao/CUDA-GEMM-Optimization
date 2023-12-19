@@ -268,10 +268,10 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
                      thread_tile_x_vector_idx < VECTORIZED_THREAD_TILE_SIZE_X;
                      ++thread_tile_x_vector_idx)
                 {
-                    *reinterpret_cast<float4*>(
+                    *reinterpret_cast<int4*>(
                         &B_vals[thread_tile_repeat_col_idx]
                                [thread_tile_x_vector_idx * NUM_VECTOR_UNITS]) =
-                        *reinterpret_cast<float4 const*>(
+                        *reinterpret_cast<int4 const*>(
                             &B_thread_block_tile[B_thread_block_tile_row_idx]
                                                 [B_thread_block_tile_col_idx +
                                                  thread_tile_x_vector_idx *
