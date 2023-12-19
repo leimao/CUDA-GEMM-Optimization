@@ -355,22 +355,23 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
                         thread_linear_col_idx_in_warp * THREAD_TILE_SIZE_X +
                         thread_tile_x_vector_idx * NUM_VECTOR_UNITS};
 
-                    int4 C_vals{*reinterpret_cast<int4 const*>(
-                        &C[C_row_idx * ldc + C_col_idx])};
-#pragma unroll
-                    for (size_t i{0U}; i < NUM_VECTOR_UNITS; ++i)
+                    if (C_row_idx < m && C_col_idx < n)
                     {
-                        reinterpret_cast<T*>(&C_vals)[i] =
-                            alpha * C_thread_results[thread_tile_repeat_row_idx]
+                        int4 C_vals{*reinterpret_cast<int4 const*>(
+                            &C[C_row_idx * ldc + C_col_idx])};
+#pragma unroll
+                        for (size_t i{0U}; i < NUM_VECTOR_UNITS; ++i)
+                        {
+                            reinterpret_cast<T*>(&C_vals)[i] =
+                                alpha *
+                                    C_thread_results[thread_tile_repeat_row_idx]
                                                     [thread_tile_repeat_col_idx]
                                                     [thread_tile_y_idx]
                                                     [thread_tile_x_vector_idx *
                                                          NUM_VECTOR_UNITS +
                                                      i] +
-                            beta * reinterpret_cast<T const*>(&C_vals)[i];
-                    }
-                    if (C_row_idx < m && C_col_idx < n)
-                    {
+                                beta * reinterpret_cast<T const*>(&C_vals)[i];
+                        }
                         *reinterpret_cast<int4*>(
                             &C[C_row_idx * ldc + C_col_idx]) = C_vals;
                     }
