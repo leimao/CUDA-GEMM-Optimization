@@ -1,6 +1,7 @@
 #include <cuda_fp16.h>
 
 #include "cuda_gemm.hpp"
+#include "cuda_gemm_utils.cuh"
 #include "cuda_gemm_utils.hpp"
 
 // GEMM kernel v04.
@@ -46,92 +47,11 @@ __global__ void gemm_v04(size_t m, size_t n, size_t k, T alpha, T const* A,
          thread_block_tile_idx < num_thread_block_tiles;
          ++thread_block_tile_idx)
     {
-// Load data from A on DRAM to A_thread_block_tile on shared memory.
-#pragma unroll
-        for (size_t load_idx{0U};
-             load_idx <
-             (BLOCK_TILE_SIZE_Y * BLOCK_TILE_SIZE_K + NUM_THREADS - 1U) /
-                 NUM_THREADS;
-             ++load_idx)
-        {
-            size_t const A_thread_block_tile_row_idx{
-                (thread_linear_idx + load_idx * NUM_THREADS) /
-                BLOCK_TILE_SIZE_K};
-            size_t const A_thread_block_tile_col_idx{
-                (thread_linear_idx + load_idx * NUM_THREADS) %
-                BLOCK_TILE_SIZE_K};
-            size_t const A_row_idx{blockIdx.y * BLOCK_TILE_SIZE_Y +
-                                   A_thread_block_tile_row_idx};
-            size_t const A_col_idx{thread_block_tile_idx * BLOCK_TILE_SIZE_K +
-                                   A_thread_block_tile_col_idx};
 
-            // These boundary checks might slow down the kernel to some extent.
-            // But they guarantee the correctness of the kernel for all
-            // different GEMM configurations.
-            T val{static_cast<T>(0)};
-            if (A_row_idx < m && A_col_idx < k)
-            {
-                val = A[A_row_idx * lda + A_col_idx];
-            }
-            // Removing the if will give another ~2 FLOPs performance on RTX
-            // 3090. But it will make the kernel incorrect for some GEMM
-            // configurations. T val{A[A_row_idx * lda + A_col_idx]}; This if
-            // will slow down the kernel. Add static asserts from the host code
-            // to guarantee this if is always true.
-            static_assert(BLOCK_TILE_SIZE_K * BLOCK_TILE_SIZE_Y % NUM_THREADS ==
-                          0U);
-            // if (A_thread_block_tile_row_idx < BLOCK_TILE_SIZE_Y &&
-            //     A_thread_block_tile_col_idx < BLOCK_TILE_SIZE_K)
-            // {
-            //     A_thread_block_tile[A_thread_block_tile_row_idx]
-            //                        [A_thread_block_tile_col_idx] = val;
-            // }
-            A_thread_block_tile[A_thread_block_tile_row_idx]
-                               [A_thread_block_tile_col_idx] = val;
-        }
-// Load data from B on DRAM to B_thread_block_tile on shared memory.
-#pragma unroll
-        for (size_t load_idx{0U};
-             load_idx <
-             (BLOCK_TILE_SIZE_K * BLOCK_TILE_SIZE_X + NUM_THREADS - 1U) /
-                 NUM_THREADS;
-             ++load_idx)
-        {
-            size_t const B_thread_block_tile_row_idx{
-                (thread_linear_idx + load_idx * NUM_THREADS) /
-                BLOCK_TILE_SIZE_X};
-            size_t const B_thread_block_tile_col_idx{
-                (thread_linear_idx + load_idx * NUM_THREADS) %
-                BLOCK_TILE_SIZE_X};
-            size_t const B_row_idx{thread_block_tile_idx * BLOCK_TILE_SIZE_K +
-                                   B_thread_block_tile_row_idx};
-            size_t const B_col_idx{blockIdx.x * BLOCK_TILE_SIZE_X +
-                                   B_thread_block_tile_col_idx};
-
-            // These boundary checks might slow down the kernel to some extent.
-            // But they guarantee the correctness of the kernel for all
-            // different GEMM configurations.
-            T val{static_cast<T>(0)};
-            if (B_row_idx < k && B_col_idx < n)
-            {
-                val = B[B_row_idx * ldb + B_col_idx];
-            }
-            // Removing the if will give another ~2 FLOPs performance on RTX
-            // 3090. But it will make the kernel incorrect for some GEMM
-            // configurations. T val{B[B_row_idx * ldb + B_col_idx]}; This if
-            // will slow down the kernel. Add static asserts from the host code
-            // to guarantee this if is always true.
-            static_assert(BLOCK_TILE_SIZE_X * BLOCK_TILE_SIZE_K % NUM_THREADS ==
-                          0U);
-            // if (B_thread_block_tile_row_idx < BLOCK_TILE_SIZE_K &&
-            //     B_thread_block_tile_col_idx < BLOCK_TILE_SIZE_X)
-            // {
-            //     B_thread_block_tile[B_thread_block_tile_row_idx]
-            //                        [B_thread_block_tile_col_idx] = val;
-            // }
-            B_thread_block_tile[B_thread_block_tile_row_idx]
-                               [B_thread_block_tile_col_idx] = val;
-        }
+        load_data_to_shared_memory<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y,
+                                   BLOCK_TILE_SIZE_K, NUM_THREADS>(
+            A, lda, B, ldb, A_thread_block_tile, B_thread_block_tile,
+            thread_block_tile_idx, thread_linear_idx, m, n, k);
         __syncthreads();
 
 #pragma unroll
