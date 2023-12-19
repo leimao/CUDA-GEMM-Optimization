@@ -108,8 +108,6 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
 // A_thread_block_tile[:, k_i] @ B_thread_block_tile[k_i, :] Note that
 // both A_thread_block_tile and B_thread_block_tile can be cached in the
 // register.
-// Can use pragma unroll to unroll these static loops to see if there is a
-// performance gain.
 #pragma unroll
         for (size_t k_i{0U}; k_i < BLOCK_TILE_SIZE_K; ++k_i)
         {
