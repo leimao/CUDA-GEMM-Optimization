@@ -14,17 +14,17 @@ int main()
     float const fp32_abs_tol{1.0e-3f};
     double const fp32_rel_tol{0.0e-4f};
 
-    // constexpr size_t m{4096U};
-    // constexpr size_t k{4096U};
-    // constexpr size_t n{4096U};
+    constexpr size_t m{4096U};
+    constexpr size_t k{4096U};
+    constexpr size_t n{4096U};
 
     // constexpr size_t m{2048U};
     // constexpr size_t k{2048U};
     // constexpr size_t n{2048U};
 
-    constexpr size_t m{1024U};
-    constexpr size_t k{1024U};
-    constexpr size_t n{1024U};
+    // constexpr size_t m{1024U};
+    // constexpr size_t k{1024U};
+    // constexpr size_t n{1024U};
 
     // constexpr size_t m{256U};
     // constexpr size_t k{256U};

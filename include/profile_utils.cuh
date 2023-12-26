@@ -235,7 +235,8 @@ void random_initialize_matrix(T* A, size_t m, size_t n, size_t lda,
 {
     std::default_random_engine eng(seed);
     // The best way to verify is to use integer values.
-    std::uniform_int_distribution<int> dis(-5, 5);
+    std::uniform_int_distribution<int> dis(0, 5);
+    // std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
     auto const rand = [&dis, &eng]() { return dis(eng); };
     for (size_t i{0U}; i < m; ++i)
     {
