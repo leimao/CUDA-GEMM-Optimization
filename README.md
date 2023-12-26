@@ -1,7 +1,7 @@
 # CUDA-GEMM-Optimization
 
-$ docker build -f docker/gemm-cuda.Dockerfile --no-cache --tag=gemm-cuda:0.0.1 .
-$ docker run -it --rm --gpus device=0 -v $(pwd):/mnt gemm-cuda:0.0.1
+$ docker build -f docker/gemm-cuda.Dockerfile --no-cache --tag=gemm-cuda:12.2.2 .
+$ docker run -it --rm --gpus device=0 -v $(pwd):/mnt gemm-cuda:12.2.2
 
 For profiling, we need additional flags `--cap-add=SYS_ADMIN --security-opt seccomp=unconfined `
 
@@ -16,6 +16,8 @@ ncu --set full -f -o profile_cuda_gemm profile_cuda_gemm
 TODO
 
 For FP16 GEMM kernels, the accumulation precision is currently using FP16 which results in a large discrepancy from the cuBLAS GEMM kernels which use FP32 for accumulation. Use FP32 for accumulation and then cast to FP16 at the end.
+
+compute-sanitizer --tool memcheck build/src/profile_cuda_gemm
 
 ## Performance on RTX 3090
 

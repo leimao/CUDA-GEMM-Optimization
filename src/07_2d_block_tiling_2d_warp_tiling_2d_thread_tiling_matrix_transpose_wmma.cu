@@ -7,7 +7,6 @@
 
 // https://developer.nvidia.com/blog/cutlass-linear-algebra-cuda/
 // https://github.com/NVIDIA/cutlass/blob/b7508e337938137a699e486d8997646980acfc58/media/docs/programming_guidelines.md
-// https://forums.developer.nvidia.com/t/how-to-use-wmma-efficiently/157619
 
 // GEMM kernel v07.
 // Each thread in the block processes THREAD_TILE_SIZE_Y *
@@ -190,7 +189,8 @@ __global__ void gemm_v07(size_t m, size_t n, size_t k, T alpha, T const* A,
                     beta * c_frag.x[i];
                 // c_frag.x[i] =
                 //     __float2half(__half2float(alpha) *
-                //         acc_frags[wmma_tile_row_idx][wmma_tile_col_idx].x[i] +
+                //         acc_frags[wmma_tile_row_idx][wmma_tile_col_idx].x[i]
+                //         +
                 //     __half2float(beta) * __half2float(c_frag.x[i]));
             }
             // Store the fragment back to shared memory.

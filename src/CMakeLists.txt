@@ -35,16 +35,20 @@ add_library(
 # Add the include directory of the library to the include directories of the project
 target_include_directories(cuda_gemm PUBLIC ${CUDA_GEMM_INCLUDE_DIRS})
 
-# Link the library to the project
-# TODO(leimao): No need for linking cuBLAS
-target_link_libraries(cuda_gemm)
-
-add_executable(profile_cuda_gemm profile_cuda_gemm.cu)
-target_link_libraries(profile_cuda_gemm cuda_gemm CUDA::cublas)
-set_target_properties(profile_cuda_gemm PROPERTIES CUDA_ARCHITECTURES native)
-
 # Set the CUDA architecture to compile the code for
 # https://cmake.org/cmake/help/latest/prop_tgt/CUDA_ARCHITECTURES.html
 set_target_properties(cuda_gemm PROPERTIES CUDA_ARCHITECTURES native)
 install(TARGETS cuda_gemm DESTINATION lib)
 install(FILES ${CUDA_GEMM_HEADERS} DESTINATION include)
+
+add_executable(profile_cuda_gemm profile_cuda_gemm.cu)
+target_link_libraries(profile_cuda_gemm cuda_gemm CUDA::cublas)
+set_target_properties(profile_cuda_gemm PROPERTIES CUDA_ARCHITECTURES native)
+
+add_executable(profile_cuda_gemm_fp32 profile_cuda_gemm_fp32.cu)
+target_link_libraries(profile_cuda_gemm_fp32 cuda_gemm CUDA::cublas)
+set_target_properties(profile_cuda_gemm_fp32 PROPERTIES CUDA_ARCHITECTURES native)
+
+add_executable(profile_cuda_gemm_fp16 profile_cuda_gemm_fp16.cu)
+target_link_libraries(profile_cuda_gemm_fp16 cuda_gemm CUDA::cublas)
+set_target_properties(profile_cuda_gemm_fp16 PROPERTIES CUDA_ARCHITECTURES native)

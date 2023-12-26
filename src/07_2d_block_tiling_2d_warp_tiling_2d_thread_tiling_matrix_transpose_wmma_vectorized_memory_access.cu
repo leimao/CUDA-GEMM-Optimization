@@ -7,7 +7,6 @@
 
 // https://developer.nvidia.com/blog/cutlass-linear-algebra-cuda/
 // https://github.com/NVIDIA/cutlass/blob/b7508e337938137a699e486d8997646980acfc58/media/docs/programming_guidelines.md
-// https://forums.developer.nvidia.com/t/how-to-use-wmma-efficiently/157619
 
 // GEMM kernel v07.
 // Each thread in the block processes THREAD_TILE_SIZE_Y *
@@ -147,13 +146,6 @@ __global__ void gemm_v07_vectorized(size_t m, size_t n, size_t k, T alpha,
                                                  WMMA_TILE_SIZE_Y],
                         BLOCK_TILE_SIZE_X + SKEW_SIZE_X);
 
-                    // nvcuda::wmma::load_matrix_sync(a_frags[wmma_tile_row_idx],
-                    // &A_thread_block_tile_transposed[0][warp_row_idx *
-                    // WARP_TILE_SIZE_Y + wmma_tile_row_idx *
-                    // WMMA_TILE_SIZE_Y], WARP_TILE_SIZE_Y);
-                    // nvcuda::wmma::load_matrix_sync(b_frags[wmma_tile_col_idx],
-                    // &B_thread_block_tile[0][0], WARP_TILE_SIZE_X);
-
                     // Perform the matrix multiplication.
                     nvcuda::wmma::mma_sync(
                         acc_frags[wmma_tile_row_idx][wmma_tile_col_idx],
@@ -178,9 +170,6 @@ __global__ void gemm_v07_vectorized(size_t m, size_t n, size_t k, T alpha,
              ++wmma_tile_col_idx)
         {
             // Load the fragment from shared memory.
-            // T* matrix_mma_c_mptr{C + blockIdx.y * BLOCK_TILE_SIZE_Y +
-            // warp_row_idx * WARP_TILE_SIZE_Y + wmma_tile_row_idx *
-            // WMMA_TILE_SIZE_Y};
             nvcuda::wmma::load_matrix_sync(
                 c_frag,
                 &C[(blockIdx.y * BLOCK_TILE_SIZE_Y +
@@ -198,10 +187,6 @@ __global__ void gemm_v07_vectorized(size_t m, size_t n, size_t k, T alpha,
                     alpha *
                         acc_frags[wmma_tile_row_idx][wmma_tile_col_idx].x[i] +
                     beta * c_frag.x[i];
-                // c_frag.x[i] =
-                //     __float2half(__half2float(alpha) *
-                //         acc_frags[wmma_tile_row_idx][wmma_tile_col_idx].x[i] +
-                //     __half2float(beta) * __half2float(c_frag.x[i]));
             }
             // Store the fragment back to shared memory.
             nvcuda::wmma::store_matrix_sync(
