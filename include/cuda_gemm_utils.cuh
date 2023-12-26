@@ -3,12 +3,7 @@
 
 #include <cuda_runtime.h>
 
-#define CHECK_CUDA_ERROR(val) check_cuda((val), #val, __FILE__, __LINE__)
-void check_cuda(cudaError_t err, const char* const func, const char* const file,
-                const int line);
-
-#define CHECK_LAST_CUDA_ERROR() check_cuda_last(__FILE__, __LINE__)
-void check_cuda_last(const char* const file, const int line);
+#include "cuda_gemm_utils.hpp"
 
 template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
           size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS, size_t SKEW_SIZE_X = 0U, size_t SKEW_SIZE_K = 0U>
