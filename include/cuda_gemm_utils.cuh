@@ -11,11 +11,11 @@ void check_cuda(cudaError_t err, const char* const func, const char* const file,
 void check_cuda_last(const char* const file, const int line);
 
 template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
-          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS>
+          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS, size_t SKEW_SIZE_X = 0U, size_t SKEW_SIZE_K = 0U>
 __device__ void load_data_to_shared_memory(T const* A, size_t lda,
                                            T const* B, size_t ldb,
-                                           T A_thread_block_tile[BLOCK_TILE_SIZE_Y][BLOCK_TILE_SIZE_K],
-                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X],
+                                           T A_thread_block_tile[BLOCK_TILE_SIZE_Y][BLOCK_TILE_SIZE_K + SKEW_SIZE_K],
+                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X + SKEW_SIZE_X],
                                            size_t thread_block_tile_idx,
                                            size_t thread_linear_idx,
                                            size_t m, size_t n,
@@ -106,11 +106,11 @@ __device__ void load_data_to_shared_memory(T const* A, size_t lda,
 }
 
 template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
-          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS>
+          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS, size_t SKEW_SIZE_X = 0U, size_t SKEW_SIZE_Y = 0U>
 __device__ void load_data_to_shared_memory_transposed(T const* A, size_t lda,
                                            T const* B, size_t ldb,
-                                           T A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_Y],
-                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X],
+                                           T A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_Y + SKEW_SIZE_Y],
+                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X + SKEW_SIZE_X],
                                            size_t thread_block_tile_idx,
                                            size_t thread_linear_idx,
                                            size_t m, size_t n,
@@ -205,11 +205,11 @@ __device__ void load_data_to_shared_memory_transposed(T const* A, size_t lda,
 }
 
 template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
-          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS, typename VECTOR_TYPE = int4>
+          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS, size_t SKEW_SIZE_X = 0U, size_t SKEW_SIZE_K = 0U, typename VECTOR_TYPE = int4>
 __device__ void load_data_to_shared_memory_vectorized(T const* A, size_t lda,
                                            T const* B, size_t ldb,
-                                           T A_thread_block_tile[BLOCK_TILE_SIZE_Y][BLOCK_TILE_SIZE_K],
-                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X],
+                                           T A_thread_block_tile[BLOCK_TILE_SIZE_Y][BLOCK_TILE_SIZE_K + SKEW_SIZE_K],
+                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X + SKEW_SIZE_X],
                                            size_t thread_block_tile_idx,
                                            size_t thread_linear_idx,
                                            size_t m, size_t n,
@@ -339,11 +339,11 @@ __device__ void load_data_to_shared_memory_vectorized(T const* A, size_t lda,
 
 
 template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
-          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS, typename VECTOR_TYPE = int4>
+          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS, size_t SKEW_SIZE_X = 0U, size_t SKEW_SIZE_Y = 0U, typename VECTOR_TYPE = int4>
 __device__ void load_data_to_shared_memory_transposed_vectorized(T const* A, size_t lda,
                                            T const* B, size_t ldb,
-                                           T A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_Y],
-                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X],
+                                           T A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_Y + SKEW_SIZE_Y],
+                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X + SKEW_SIZE_X],
                                            size_t thread_block_tile_idx,
                                            size_t thread_linear_idx,
                                            size_t m, size_t n,

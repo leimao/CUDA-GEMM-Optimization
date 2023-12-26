@@ -112,6 +112,64 @@ void launch_gemm_cublas(size_t m, size_t n, size_t k, T const* alpha,
         data_type, lda, beta, C, data_type, ldc, data_type, algo));
 }
 
+template <typename T,
+          typename std::enable_if<std::is_same<T, float>::value ||
+                                      std::is_same<T, double>::value,
+                                  bool>::type = true>
+void launch_gemm_cpu(size_t m, size_t n, size_t k, T const* alpha, T const* A,
+                     size_t lda, T const* B, size_t ldb, T const* beta, T* C,
+                     size_t ldc)
+{
+    // Compute GEMM using CPU.
+    for (size_t i{0U}; i < m; ++i)
+    {
+        for (size_t j{0U}; j < n; ++j)
+        {
+            T sum{static_cast<T>(0)};
+            for (size_t l{0U}; l < k; ++l)
+            {
+                sum += A[i * lda + l] * B[l * ldb + j];
+            }
+            C[i * ldc + j] = (*alpha) * sum + (*beta) * C[i * ldc + j];
+        }
+    }
+}
+
+template <typename T, typename std::enable_if<std::is_same<T, __half>::value,
+                                              bool>::type = true>
+void launch_gemm_cpu(size_t m, size_t n, size_t k, T const* alpha, T const* A,
+                     size_t lda, T const* B, size_t ldb, T const* beta, T* C,
+                     size_t ldc)
+{
+    // Compute GEMM using CPU.
+    for (size_t i{0U}; i < m; ++i)
+    {
+        for (size_t j{0U}; j < n; ++j)
+        {
+            // float sum{0.0f};
+            // for (size_t l{0U}; l < k; ++l)
+            // {
+            //     sum +=
+            //         __half2float(A[i * lda + l]) * __half2float(B[l * ldb + j]);
+            // }
+            // C[i * ldc + j] = __float2half(__half2float(*alpha) * sum +
+            //                               __half2float(*beta) *
+            //                                   __half2float(C[i * ldc + j]));
+            __half sum{__float2half(0.0f)};
+            for (size_t l{0U}; l < k; ++l)
+            {
+                // sum +=
+                //     __hmul(A[i * lda + l], B[l * ldb + j]);
+                sum +=
+                    __hmul(sum, sum);
+            }
+            // C[i * ldc + j] = __float2half((*alpha) * sum +
+            //                               (*beta) *
+            //                                   (C[i * ldc + j]));
+        }
+    }
+}
+
 template <typename T>
 bool all_close(T const* C, T const* C_ref, size_t m, size_t n, size_t ldc,
                T abs_tol, double rel_tol)
@@ -177,8 +235,7 @@ float compute_effective_tflops(size_t m, size_t n, size_t k, float latency)
 
 template <typename T,
           typename std::enable_if<std::is_same<T, float>::value ||
-                                      std::is_same<T, double>::value ||
-                                      std::is_same<T, __half>::value,
+                                      std::is_same<T, double>::value,
                                   bool>::type = true>
 void random_initialize_matrix(T* A, size_t m, size_t n, size_t lda,
                               unsigned int seed = 0U)
@@ -187,13 +244,36 @@ void random_initialize_matrix(T* A, size_t m, size_t n, size_t lda,
     // std::uniform_real_distribution<double> dis(0.0, 1.0);
     // auto const rand = [&dis, &gen]() { return dis(gen); };
     // The best way to verify is to use integer values.
-    std::uniform_int_distribution<int> dis(0, 10);
+    std::uniform_int_distribution<int> dis(-5, 5);
+    // std::uniform_int_distribution<int> dis(20, 25);
     auto const rand = [&dis, &eng]() { return dis(eng); };
     for (size_t i{0U}; i < m; ++i)
     {
         for (size_t j{0U}; j < n; ++j)
         {
             A[i * lda + j] = static_cast<T>(rand());
+        }
+    }
+}
+
+template <typename T,
+          typename std::enable_if<std::is_same<T, __half>::value,
+                                  bool>::type = true>
+void random_initialize_matrix(T* A, size_t m, size_t n, size_t lda,
+                              unsigned int seed = 0U)
+{
+    std::default_random_engine eng(seed);
+    // std::uniform_real_distribution<double> dis(0.0, 1.0);
+    // auto const rand = [&dis, &gen]() { return dis(gen); };
+    // The best way to verify is to use integer values.
+    std::uniform_int_distribution<int> dis(4, 5);
+    // std::uniform_int_distribution<int> dis(20, 25);
+    auto const rand = [&dis, &eng]() { return dis(eng); };
+    for (size_t i{0U}; i < m; ++i)
+    {
+        for (size_t j{0U}; j < n; ++j)
+        {
+            A[i * lda + j] = __float2half(static_cast<float>(rand()));
         }
     }
 }
@@ -224,7 +304,7 @@ std::pair<float, float> profile_gemm(
     size_t num_repeats = 10, size_t num_warmups = 10, unsigned int seed = 0U)
 {
     T const alpha{static_cast<T>(1.0)};
-    T const beta{static_cast<T>(1.0)};
+    T const beta{static_cast<T>(0.0)};
 
     T const abs_tol{static_cast<T>(1.0e-4)};
     double const rel_tol{0.0e-4};
@@ -265,20 +345,46 @@ std::pair<float, float> profile_gemm(
                                 cudaMemcpyHostToDevice));
     CHECK_CUDA_ERROR(cudaMemcpy(C_device, C_host, m * ldc * sizeof(T),
                                 cudaMemcpyHostToDevice));
+    CHECK_CUDA_ERROR(cudaMemcpy(C_host_ref, C_host, m * ldc * sizeof(T),
+                                cudaMemcpyHostToHost));
 
     // Create cuBLAS handle.
     cublasHandle_t handle;
     CHECK_CUBLASS_ERROR(cublasCreate(&handle));
     CHECK_CUBLASS_ERROR(cublasSetStream(handle, stream));
 
-    // Compute reference output.
-    launch_gemm_cublas<T>(m, n, k, &alpha, A_device, lda, B_device, ldb, &beta,
-                          C_device, ldc, handle);
-    CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
+    // // Compute reference output using cuBLAS.
+    // launch_gemm_cublas<T>(m, n, k, &alpha, A_device, lda, B_device, ldb,
+    // &beta,
+    //                       C_device, ldc, handle);
+    // CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
 
-    // Copy matrix C from device to host.
-    CHECK_CUDA_ERROR(cudaMemcpy(C_host_ref, C_device, m * ldc * sizeof(T),
-                                cudaMemcpyDeviceToHost));
+    // // Copy matrix C from device to host.
+    // CHECK_CUDA_ERROR(cudaMemcpy(C_host_ref, C_device, m * ldc * sizeof(T),
+    //                             cudaMemcpyDeviceToHost));
+
+    // Compute reference output using CPU.
+    std::cout << "Computing reference output using CPU..." << std::endl;
+    launch_gemm_cpu<T>(m, n, k, &alpha, A_host, lda, B_host, ldb, &beta,
+                       C_host_ref, ldc);
+    std::cout << "Done." << std::endl;
+
+    // Launch CUDA GEMM.
+    CHECK_CUDA_ERROR(cudaMemcpy(C_device, C_host, m * ldc * sizeof(T),
+                                cudaMemcpyHostToDevice));
+    // Verify the correctness of CUDA GEMM.
+    // gemm_kernel_launch_function(m, n, k, &alpha, A_device, lda, B_device, ldb,
+    //                             &beta, C_device, ldc, stream);
+
+    launch_gemm_cublas<T>(m, n, k, &alpha, A_device, lda, B_device, ldb,
+    &beta,
+                          C_device, ldc, handle);
+
+    CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
+    CHECK_CUDA_ERROR(cudaMemcpy(C_host_from_device, C_device,
+                                m * ldc * sizeof(T), cudaMemcpyDeviceToHost));
+    assert(all_close<T>(C_host_from_device, C_host_ref, m, n, ldc, abs_tol,
+                        rel_tol));
 
     // Launch cuBLAS GEMM.
     float const latency_cublas{measure_performance<T>(
@@ -289,18 +395,6 @@ std::pair<float, float> profile_gemm(
             return 0.0f;
         },
         stream, num_repeats, num_warmups)};
-
-    // Launch CUDA GEMM.
-    CHECK_CUDA_ERROR(cudaMemcpy(C_device, C_host, m * ldc * sizeof(T),
-                                cudaMemcpyHostToDevice));
-    // Verify the correctness of CUDA GEMM.
-    gemm_kernel_launch_function(m, n, k, &alpha, A_device, lda, B_device, ldb,
-                                &beta, C_device, ldc, stream);
-    CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
-    CHECK_CUDA_ERROR(cudaMemcpy(C_host_from_device, C_device,
-                                m * ldc * sizeof(T), cudaMemcpyDeviceToHost));
-    assert(all_close<T>(C_host_from_device, C_host_ref, m, n, ldc, abs_tol,
-                        rel_tol));
 
     float const latency_cuda_gemm{measure_performance<T>(
         [&](cudaStream_t stream)
@@ -339,20 +433,24 @@ int main()
 {
     print_device_info();
 
-    constexpr size_t num_repeats{20U};
-    constexpr size_t num_warmups{20U};
+    constexpr size_t num_repeats{10U};
+    constexpr size_t num_warmups{10U};
 
-    constexpr size_t m{4096U};
-    constexpr size_t k{4096U};
-    constexpr size_t n{4096U};
+    // constexpr size_t m{4096U};
+    // constexpr size_t k{4096U};
+    // constexpr size_t n{4096U};
 
     // constexpr size_t m{2048U};
     // constexpr size_t k{2048U};
     // constexpr size_t n{2048U};
 
-    // constexpr size_t m{256U};
-    // constexpr size_t k{256U};
-    // constexpr size_t n{256U};
+    // constexpr size_t m{1024U};
+    // constexpr size_t k{1024U};
+    // constexpr size_t n{1024U};
+
+    constexpr size_t m{256U};
+    constexpr size_t k{256U};
+    constexpr size_t n{256U};
 
     // constexpr size_t m{1372U};
     // constexpr size_t k{1153U};
@@ -387,25 +485,24 @@ int main()
                            size_t, float const*, size_t, float const*, float*,
                            size_t, cudaStream_t)>>> const
         gemm_kernel_launch_functions{
+            // {"Custom GEMM Kernel V00", launch_gemm_kernel_v00<float>},
+            // {"Custom GEMM Kernel V01", launch_gemm_kernel_v01<float>},
+            // {"Custom GEMM Kernel V02", launch_gemm_kernel_v02<float>},
+            // {"Custom GEMM Kernel V02 Vectorized",
+            //  launch_gemm_kernel_v02_vectorized<float>},
+            // {"Custom GEMM Kernel V03", launch_gemm_kernel_v03<float>},
+            // {"Custom GEMM Kernel V03 Vectorized",
+            //  launch_gemm_kernel_v03_vectorized<float>},
+            // {"Custom GEMM Kernel V04", launch_gemm_kernel_v04<float>},
+            // {"Custom GEMM Kernel V04 Vectorized",
+            //  launch_gemm_kernel_v04_vectorized<float>},
+            // {"Custom GEMM Kernel V05", launch_gemm_kernel_v05<float>},
+            // {"Custom GEMM Kernel V05 Vectorized",
+            //  launch_gemm_kernel_v05_vectorized<float>},
+            // {"Custom GEMM Kernel V06", launch_gemm_kernel_v06<float>},
             // {"Custom GEMM Kernel V06 Vectorized",
-            //  launch_gemm_kernel_v06_vectorized<float>},
-            {"Custom GEMM Kernel V00", launch_gemm_kernel_v00<float>},
-            {"Custom GEMM Kernel V01", launch_gemm_kernel_v01<float>},
-            {"Custom GEMM Kernel V02", launch_gemm_kernel_v02<float>},
-            {"Custom GEMM Kernel V02 Vectorized",
-             launch_gemm_kernel_v02_vectorized<float>},
-            {"Custom GEMM Kernel V03", launch_gemm_kernel_v03<float>},
-            {"Custom GEMM Kernel V03 Vectorized",
-             launch_gemm_kernel_v03_vectorized<float>},
-            {"Custom GEMM Kernel V04", launch_gemm_kernel_v04<float>},
-            {"Custom GEMM Kernel V04 Vectorized",
-             launch_gemm_kernel_v04_vectorized<float>},
-            {"Custom GEMM Kernel V05", launch_gemm_kernel_v05<float>},
-            {"Custom GEMM Kernel V05 Vectorized",
-             launch_gemm_kernel_v05_vectorized<float>},
-            {"Custom GEMM Kernel V06", launch_gemm_kernel_v06<float>},
-            {"Custom GEMM Kernel V06 Vectorized",
-             launch_gemm_kernel_v06_vectorized<float>}};
+            //  launch_gemm_kernel_v06_vectorized<float>}
+        };
 
     for (auto const& gemm_kernel_launch_function : gemm_kernel_launch_functions)
     {
@@ -417,41 +514,43 @@ int main()
         std::cout << std::endl;
     }
 
-    // std::vector<std::pair<
-    //     std::string,
-    //     std::function<void(size_t, size_t, size_t, __half const*, __half
-    //     const*,
-    //                        size_t, __half const*, size_t, __half const*,
-    //                        __half*, size_t, cudaStream_t)>>> const
-    //     gemm_fp16_kernel_launch_functions{
-    //         {"Custom GEMM Kernel V00", launch_gemm_kernel_v00<__half>},
-    //         {"Custom GEMM Kernel V01", launch_gemm_kernel_v01<__half>},
-    //         {"Custom GEMM Kernel V02", launch_gemm_kernel_v02<__half>},
-    //         {"Custom GEMM Kernel V02 Vectorized",
-    //          launch_gemm_kernel_v02_vectorized<__half>},
-    //         {"Custom GEMM Kernel V03", launch_gemm_kernel_v03<__half>},
-    //         {"Custom GEMM Kernel V03 Vectorized",
-    //          launch_gemm_kernel_v03_vectorized<__half>},
-    //         {"Custom GEMM Kernel V04", launch_gemm_kernel_v04<__half>},
-    //         {"Custom GEMM Kernel V04 Vectorized",
-    //          launch_gemm_kernel_v04_vectorized<__half>},
-    //         {"Custom GEMM Kernel V05", launch_gemm_kernel_v05<__half>},
-    //         {"Custom GEMM Kernel V05 Vectorized",
-    //          launch_gemm_kernel_v05_vectorized<__half>},
-    //         {"Custom GEMM Kernel V06", launch_gemm_kernel_v06<__half>},
-    //         {"Custom GEMM Kernel V06 Vectorized",
-    //          launch_gemm_kernel_v06_vectorized<__half>}};
+    std::vector<std::pair<
+        std::string,
+        std::function<void(size_t, size_t, size_t, __half const*, __half const*,
+                           size_t, __half const*, size_t, __half const*,
+                           __half*, size_t, cudaStream_t)>>> const
+        gemm_fp16_kernel_launch_functions{
+            // {"Custom GEMM Kernel V00", launch_gemm_kernel_v00<__half>},
+            // {"Custom GEMM Kernel V01", launch_gemm_kernel_v01<__half>},
+            // {"Custom GEMM Kernel V02", launch_gemm_kernel_v02<__half>},
+            // {"Custom GEMM Kernel V02 Vectorized",
+            //  launch_gemm_kernel_v02_vectorized<__half>},
+            // {"Custom GEMM Kernel V03", launch_gemm_kernel_v03<__half>},
+            // {"Custom GEMM Kernel V03 Vectorized",
+            //  launch_gemm_kernel_v03_vectorized<__half>},
+            // {"Custom GEMM Kernel V04", launch_gemm_kernel_v04<__half>},
+            // {"Custom GEMM Kernel V04 Vectorized",
+            //  launch_gemm_kernel_v04_vectorized<__half>},
+            // {"Custom GEMM Kernel V05", launch_gemm_kernel_v05<__half>},
+            {"Custom GEMM Kernel V05 Vectorized",
+             launch_gemm_kernel_v05_vectorized<__half>},
+            // {"Custom GEMM Kernel V06", launch_gemm_kernel_v06<__half>},
+            // {"Custom GEMM Kernel V06 Vectorized",
+            //  launch_gemm_kernel_v06_vectorized<__half>},
+            // {"Custom GEMM Kernel V07", launch_gemm_kernel_v07<__half>},
+            {"Custom GEMM Kernel V07 Vectorized",
+             launch_gemm_kernel_v07_vectorized<__half>}};
 
-    // for (auto const& gemm_fp16_kernel_launch_function :
-    // gemm_fp16_kernel_launch_functions)
-    // {
-    //     std::cout << gemm_fp16_kernel_launch_function.first << std::endl;
-    //     std::pair<__half, __half> const gemm_kernel_profile_result{
-    //         profile_gemm<__half>(m, n, k, lda, ldb, ldc,
-    //                             gemm_fp16_kernel_launch_function.second,
-    //                             num_repeats, num_warmups)};
-    //     std::cout << std::endl;
-    // }
+    for (auto const& gemm_fp16_kernel_launch_function :
+         gemm_fp16_kernel_launch_functions)
+    {
+        std::cout << gemm_fp16_kernel_launch_function.first << std::endl;
+        std::pair<__half, __half> const gemm_kernel_profile_result{
+            profile_gemm<__half>(m, n, k, lda, ldb, ldc,
+                                 gemm_fp16_kernel_launch_function.second,
+                                 num_repeats, num_warmups)};
+        std::cout << std::endl;
+    }
 
     return 0;
 }

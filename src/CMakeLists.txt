@@ -28,8 +28,9 @@ add_library(
     05_2d_block_tiling_2d_thread_tiling_matrix_transpose_vectorized_memory_access.cu
     06_2d_block_tiling_2d_warp_tiling_2d_thread_tiling_matrix_transpose.cu
     06_2d_block_tiling_2d_warp_tiling_2d_thread_tiling_matrix_transpose_vectorized_memory_access.cu
+    07_2d_block_tiling_2d_warp_tiling_2d_thread_tiling_matrix_transpose_wmma.cu
+    07_2d_block_tiling_2d_warp_tiling_2d_thread_tiling_matrix_transpose_wmma_vectorized_memory_access.cu
 )
-# add_library(gemm SHARED ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Add the include directory of the library to the include directories of the project
 target_include_directories(cuda_gemm PUBLIC ${CUDA_GEMM_INCLUDE_DIRS})
@@ -40,7 +41,7 @@ target_link_libraries(cuda_gemm)
 
 add_executable(profile_cuda_gemm profile_cuda_gemm.cu)
 target_link_libraries(profile_cuda_gemm cuda_gemm CUDA::cublas)
-
+set_target_properties(profile_cuda_gemm PROPERTIES CUDA_ARCHITECTURES native)
 
 # Set the CUDA architecture to compile the code for
 # https://cmake.org/cmake/help/latest/prop_tgt/CUDA_ARCHITECTURES.html
