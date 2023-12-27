@@ -216,14 +216,8 @@ void launch_gemm_kernel_v07(size_t m, size_t n, size_t k, T const* alpha,
     constexpr unsigned int WMMA_TILE_SIZE_Y{16U};
     constexpr unsigned int WMMA_TILE_SIZE_K{16U};
 
-    constexpr unsigned int NUM_THREADS_PER_WARP_X{4U};
-    constexpr unsigned int NUM_THREADS_PER_WARP_Y{8U};
-    static_assert(NUM_THREADS_PER_WARP_X * NUM_THREADS_PER_WARP_Y == 32U);
-
-    constexpr unsigned int NUM_THREADS_X{NUM_WARPS_X * NUM_THREADS_PER_WARP_X};
-    constexpr unsigned int NUM_THREADS_Y{NUM_WARPS_Y * NUM_THREADS_PER_WARP_Y};
-
-    constexpr unsigned int NUM_THREADS_PER_BLOCK{NUM_THREADS_X * NUM_THREADS_Y};
+    constexpr unsigned int NUM_THREADS_PER_BLOCK{NUM_WARPS_X * NUM_WARPS_Y *
+                                                 32U};
 
     dim3 const block_dim{NUM_THREADS_PER_BLOCK, 1U, 1U};
     dim3 const grid_dim{

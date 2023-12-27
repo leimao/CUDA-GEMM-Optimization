@@ -18,26 +18,6 @@ int main()
     constexpr size_t k{4096U};
     constexpr size_t n{4096U};
 
-    // constexpr size_t m{2048U};
-    // constexpr size_t k{2048U};
-    // constexpr size_t n{2048U};
-
-    // constexpr size_t m{1024U};
-    // constexpr size_t k{1024U};
-    // constexpr size_t n{1024U};
-
-    // constexpr size_t m{256U};
-    // constexpr size_t k{256U};
-    // constexpr size_t n{256U};
-
-    // constexpr size_t m{1372U};
-    // constexpr size_t k{1153U};
-    // constexpr size_t n{2171U};
-
-    // constexpr size_t lda{m};
-    // constexpr size_t ldb{k};
-    // constexpr size_t ldc{n};
-
     constexpr size_t lda{(k + 16U - 1U) / 16U * 16U};
     constexpr size_t ldb{(n + 16U - 1U) / 16U * 16U};
     constexpr size_t ldc{(n + 16U - 1U) / 16U * 16U};
