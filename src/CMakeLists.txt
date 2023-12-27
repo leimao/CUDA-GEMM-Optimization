@@ -41,10 +41,6 @@ set_target_properties(cuda_gemm PROPERTIES CUDA_ARCHITECTURES native)
 install(TARGETS cuda_gemm DESTINATION lib)
 install(FILES ${CUDA_GEMM_HEADERS} DESTINATION include)
 
-add_executable(profile_cuda_gemm profile_cuda_gemm.cu)
-target_link_libraries(profile_cuda_gemm cuda_gemm CUDA::cublas)
-set_target_properties(profile_cuda_gemm PROPERTIES CUDA_ARCHITECTURES native)
-
 add_executable(profile_cuda_gemm_fp32 profile_cuda_gemm_fp32.cu)
 target_link_libraries(profile_cuda_gemm_fp32 cuda_gemm CUDA::cublas)
 set_target_properties(profile_cuda_gemm_fp32 PROPERTIES CUDA_ARCHITECTURES native)

@@ -221,6 +221,11 @@ __device__ void load_data_to_shared_memory_vectorized(T const* A, size_t lda,
                                                   NUM_VECTOR_UNITS};
     static_assert(BLOCK_TILE_SIZE_X % NUM_VECTOR_UNITS == 0U);
 
+    // The skew size could affect the data alignment in shared memory when we use vectorized load.
+    // We need to make sure the data alignment is correct.
+    static_assert((BLOCK_TILE_SIZE_K + SKEW_SIZE_K) * sizeof(T) % sizeof(VECTOR_TYPE) == 0U);
+    static_assert((BLOCK_TILE_SIZE_X + SKEW_SIZE_X) * sizeof(T) % sizeof(VECTOR_TYPE) == 0U);
+
 // Load data from A on DRAM to A_thread_block_tile on shared memory.
 #pragma unroll
     for (size_t load_idx{0U};
@@ -354,6 +359,11 @@ __device__ void load_data_to_shared_memory_transposed_vectorized(T const* A, siz
     constexpr size_t VECTORIZED_BLOCK_TILE_SIZE_X{BLOCK_TILE_SIZE_X /
                                                   NUM_VECTOR_UNITS};
     static_assert(BLOCK_TILE_SIZE_X % NUM_VECTOR_UNITS == 0U);
+
+    // The skew size could affect the data alignment in shared memory when we use vectorized load.
+    // We need to make sure the data alignment is correct.
+    static_assert((BLOCK_TILE_SIZE_Y + SKEW_SIZE_Y) * sizeof(T) % sizeof(VECTOR_TYPE) == 0U);
+    static_assert((BLOCK_TILE_SIZE_X + SKEW_SIZE_X) * sizeof(T) % sizeof(VECTOR_TYPE) == 0U);
 
 // Load data from A on DRAM to A_thread_block_tile on shared memory.
 #pragma unroll
