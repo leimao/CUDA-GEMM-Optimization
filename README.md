@@ -1,4 +1,4 @@
-# CUDA-GEMM-Optimization
+# CUDA GEMM Optimization
 
 $ docker build -f docker/gemm-cuda.Dockerfile --no-cache --tag=gemm-cuda:12.2.2 .
 $ docker run -it --rm --gpus device=0 -v $(pwd):/mnt gemm-cuda:12.2.2

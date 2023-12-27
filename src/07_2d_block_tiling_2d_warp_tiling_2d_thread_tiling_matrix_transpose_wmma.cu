@@ -13,37 +13,24 @@
 // THREAD_TILE_SIZE_X output values. Number of threads BLOCK_TILE_SIZE_Y *
 // BLOCK_TILE_SIZE_X / (THREAD_TILE_SIZE_Y * THREAD_TILE_SIZE_X)
 template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
-          size_t BLOCK_TILE_SIZE_K, size_t WARP_TILE_SIZE_X,
+          size_t BLOCK_TILE_SIZE_K, size_t BLOCK_TILE_SKEW_SIZE_X,
+          size_t BLOCK_TILE_SKEW_SIZE_Y, size_t WARP_TILE_SIZE_X,
           size_t WARP_TILE_SIZE_Y, size_t WMMA_TILE_SIZE_X,
-          size_t WMMA_TILE_SIZE_Y, size_t WMMA_TILE_SIZE_K,
-          size_t NUM_THREADS_PER_WARP_X, size_t NUM_THREADS_PER_WARP_Y>
+          size_t WMMA_TILE_SIZE_Y, size_t WMMA_TILE_SIZE_K, size_t NUM_THREADS>
 __global__ void gemm_v07(size_t m, size_t n, size_t k, T alpha, T const* A,
                          size_t lda, T const* B, size_t ldb, T beta, T* C,
                          size_t ldc)
 {
-    static_assert(NUM_THREADS_PER_WARP_X * NUM_THREADS_PER_WARP_Y == 32U);
     constexpr size_t NUM_WARPS_X{BLOCK_TILE_SIZE_X / WARP_TILE_SIZE_X};
     static_assert(BLOCK_TILE_SIZE_X % WARP_TILE_SIZE_X == 0U);
-    constexpr size_t NUM_WARPS_Y{BLOCK_TILE_SIZE_Y / WARP_TILE_SIZE_Y};
     static_assert(BLOCK_TILE_SIZE_Y % WARP_TILE_SIZE_Y == 0U);
 
-    constexpr unsigned int NUM_THREADS_X{NUM_WARPS_X * NUM_THREADS_PER_WARP_X};
-    constexpr unsigned int NUM_THREADS_Y{NUM_WARPS_Y * NUM_THREADS_PER_WARP_Y};
-    // Avoid using blockDim.x * blockDim.y as the number of threads per block.
-    // Because it is a runtime constant and the compiler cannot optimize the
-    // loop unrolling based on that.
-    // Use a compile time constant instead.
-    constexpr size_t NUM_THREADS{NUM_THREADS_X * NUM_THREADS_Y};
-
-    constexpr size_t SKEW_SIZE_X{16U};
-    constexpr size_t SKEW_SIZE_Y{16U};
-
     // Cache a tile of A and B in shared memory for data reuse.
-    __shared__ T
-        A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K]
-                                      [BLOCK_TILE_SIZE_Y + SKEW_SIZE_Y];
-    __shared__ T
-        B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X + SKEW_SIZE_X];
+    __shared__ T A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K]
+                                               [BLOCK_TILE_SIZE_Y +
+                                                BLOCK_TILE_SKEW_SIZE_Y];
+    __shared__ T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X +
+                                                        BLOCK_TILE_SKEW_SIZE_X];
 
     constexpr size_t NUM_WMMA_TILES_X{WARP_TILE_SIZE_X / WMMA_TILE_SIZE_X};
     static_assert(WARP_TILE_SIZE_X % WMMA_TILE_SIZE_X == 0U);
@@ -101,7 +88,7 @@ __global__ void gemm_v07(size_t m, size_t n, size_t k, T alpha, T const* A,
     {
         load_data_to_shared_memory_transposed<
             T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
-            NUM_THREADS, SKEW_SIZE_X, SKEW_SIZE_Y>(
+            NUM_THREADS, BLOCK_TILE_SKEW_SIZE_X, BLOCK_TILE_SKEW_SIZE_Y>(
             A, lda, B, ldb, A_thread_block_tile_transposed, B_thread_block_tile,
             thread_block_tile_idx, thread_linear_idx, m, n, k);
         __syncthreads();
@@ -131,7 +118,7 @@ __global__ void gemm_v07(size_t m, size_t n, size_t k, T alpha, T const* A,
                                                         WARP_TILE_SIZE_Y +
                                                     wmma_tile_row_idx *
                                                         WMMA_TILE_SIZE_Y],
-                    BLOCK_TILE_SIZE_Y + SKEW_SIZE_Y);
+                    BLOCK_TILE_SIZE_Y + BLOCK_TILE_SKEW_SIZE_Y);
 #pragma unroll
                 for (size_t wmma_tile_col_idx{0U};
                      wmma_tile_col_idx < NUM_WMMA_TILES_X; ++wmma_tile_col_idx)
@@ -144,7 +131,7 @@ __global__ void gemm_v07(size_t m, size_t n, size_t k, T alpha, T const* A,
                                             [warp_col_idx * WARP_TILE_SIZE_X +
                                              wmma_tile_col_idx *
                                                  WMMA_TILE_SIZE_Y],
-                        BLOCK_TILE_SIZE_X + SKEW_SIZE_X);
+                        BLOCK_TILE_SIZE_X + BLOCK_TILE_SKEW_SIZE_X);
 
                     // Perform the matrix multiplication.
                     nvcuda::wmma::mma_sync(
@@ -221,6 +208,10 @@ void launch_gemm_kernel_v07(size_t m, size_t n, size_t k, T const* alpha,
     static_assert(BLOCK_TILE_SIZE_X % WARP_TILE_SIZE_X == 0U);
     static_assert(BLOCK_TILE_SIZE_Y % WARP_TILE_SIZE_Y == 0U);
 
+    // The skew size is used to avoid bank conflicts in shared memory.
+    constexpr size_t BLOCK_TILE_SKEW_SIZE_X{16U};
+    constexpr size_t BLOCK_TILE_SKEW_SIZE_Y{16U};
+
     constexpr unsigned int WMMA_TILE_SIZE_X{16U};
     constexpr unsigned int WMMA_TILE_SIZE_Y{16U};
     constexpr unsigned int WMMA_TILE_SIZE_K{16U};
@@ -242,10 +233,11 @@ void launch_gemm_kernel_v07(size_t m, size_t n, size_t k, T const* alpha,
             BLOCK_TILE_SIZE_Y,
         1U};
     gemm_v07<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
-             WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, WMMA_TILE_SIZE_X,
-             WMMA_TILE_SIZE_Y, WMMA_TILE_SIZE_K, NUM_THREADS_PER_WARP_X,
-             NUM_THREADS_PER_WARP_Y><<<grid_dim, block_dim, 0U, stream>>>(
-        m, n, k, *alpha, A, lda, B, ldb, *beta, C, ldc);
+             BLOCK_TILE_SKEW_SIZE_X, BLOCK_TILE_SKEW_SIZE_Y, WARP_TILE_SIZE_X,
+             WARP_TILE_SIZE_Y, WMMA_TILE_SIZE_X, WMMA_TILE_SIZE_Y,
+             WMMA_TILE_SIZE_K, NUM_THREADS_PER_BLOCK>
+        <<<grid_dim, block_dim, 0U, stream>>>(m, n, k, *alpha, A, lda, B, ldb,
+                                              *beta, C, ldc);
     CHECK_LAST_CUDA_ERROR();
 }
 
