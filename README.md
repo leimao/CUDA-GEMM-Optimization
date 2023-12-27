@@ -2,9 +2,13 @@
 
 ## Introduction
 
-This repository contains the CUDA kernels for general matrix-matrix multiplication (GEMM) and the corresponding performance analysis. The correctness of the CUDA kernels is guaranteed for any matrix size. The parameters of the CUDA kernels are slightly turned for GEMM 4096 x 4096 x 4096 on an NVIDIA GeForce RTX 3090 GPU.
+This repository contains the CUDA kernels for general matrix-matrix multiplication (GEMM) and the corresponding performance analysis. The correctness of the CUDA kernels is guaranteed for any matrix size. The parameters of the CUDA kernels are slightly turned for GEMM 4096 x 4096 x 4096 on an NVIDIA GeForce RTX 3090 GPU. The CUDA kernels should be compatible with any NVIDIA GPUs with compute capability 7.0 or higher.
 
 ## Usages
+
+Docker is used to build and run the CUDA kernels. The Docker container is built based on the [NVIDIA NGC CUDA 12.2.2](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/cuda) Docker container.
+
+Please adjust the base Docker container CUDA version if the host computer has a different CUDA version. Otherwise, weird compilation errors and runtime errors may occur.
 
 ### Build Docker Images
 
@@ -76,7 +80,3 @@ All the experiments are conducted on a single NVIDIA GeForce RTX 3090 GPU. The p
 | Custom GEMM Kernel V06 Vectorized | 28.4588  | 2D block tiling and 2D warp tiling and 2D thread tiling and matrix transpose with vectorized memory access |
 | Custom GEMM Kernel V07            | 33.808   |                                           2D block tiling and 2D warp tiling and WMMA and matrix transpose |
 | Custom GEMM Kernel V07 Vectorized | 46.7866  |             2D block tiling and 2D warp tiling and WMMA and matrix transpose and vectorized memory access. |
-
-```
-
-```
