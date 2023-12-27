@@ -92,3 +92,7 @@ The FP16 custom GEMM kernels V00 to V06 do not utilize the NVIDIA Tensor Cores. 
 | Custom GEMM Kernel V06 Vectorized | 28.4588  | 2D block tiling and 2D warp tiling and 2D thread tiling and matrix transpose with vectorized memory access |
 | Custom GEMM Kernel V07            | 33.808   |                                           2D block tiling and 2D warp tiling and WMMA and matrix transpose |
 | Custom GEMM Kernel V07 Vectorized | 46.7866  |             2D block tiling and 2D warp tiling and WMMA and matrix transpose and vectorized memory access. |
+
+## References
+
+- [CUDA Matrix Multiplication Optimization](https://leimao.github.io/article/CUDA-Matrix-Multiplication-Optimization/)
