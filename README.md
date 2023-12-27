@@ -1,25 +1,52 @@
 # CUDA GEMM Optimization
 
+## Introduction
+
+## Usages
+
+### Build Docker Images
+
+```bash
 $ docker build -f docker/gemm-cuda.Dockerfile --no-cache --tag=gemm-cuda:12.2.2 .
+```
+
+### Run Docker Container
+
+```bash
 $ docker run -it --rm --gpus device=0 -v $(pwd):/mnt gemm-cuda:12.2.2
+```
 
-For profiling, we need additional flags `--cap-add=SYS_ADMIN --security-opt seccomp=unconfined `
+If we want to profile the CUDA kernels using [NVIDIA Nsight Compute](/blog/Docker-Nsight-Compute/), we need to add additional flags `--cap-add=SYS_ADMIN` and `--security-opt seccomp=unconfined` when we run the Docker container.
 
-cmake -B build
+### Build CUDA Kernels
 
-cmake --build build --config Release --parallel
+```bash
+$ cmake -B build
+$ cmake --build build --config Release --parallel
+$ cmake --install build
+```
 
-cmake --install build
+## Performances
 
-ncu --set full -f -o profile_cuda_gemm profile_cuda_gemm
+### FP32 GEMM
 
-TODO
+| Kernel                            | TFLOPS   |                                                                                                Description |
+| :-------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------: |
+| cuBLAS GEMM Kernel                | 24.5971  |                                                                                      cuBLAS implementation |
+| Custom GEMM Kernel V00            | 0.278129 |                                                                         Non-coalesced global memory access |
+| Custom GEMM Kernel V01            | 1.7218   |                                                                             Coalesced global memory access |
+| Custom GEMM Kernel V02            | 2.66157  |                                                                                            2D block tiling |
+| Custom GEMM Kernel V02 Vectorized | 1.90514  |                                                              2D block tiling with vectorized memory access |
+| Custom GEMM Kernel V03            | 8.91318  |                                                                       2D block tiling and 1D thread tiling |
+| Custom GEMM Kernel V03 Vectorized | 4.04796  |                                         2D block tiling and 1D thread tiling with vectorized memory access |
+| Custom GEMM Kernel V04            | 13.0247  |                                                                       2D block tiling and 2D thread tiling |
+| Custom GEMM Kernel V04 Vectorized | 15.027   |                                         2D block tiling and 2D thread tiling with vectorized memory access |
+| Custom GEMM Kernel V05            | 11.1448  |                                                  2D block tiling and 2D thread tiling and matrix transpose |
+| Custom GEMM Kernel V05 Vectorized | 19.6688  |                    2D block tiling and 2D thread tiling and matrix transpose with vectorized memory access |
+| Custom GEMM Kernel V06            | 11.0703  |                               2D block tiling and 2D warp tiling and 2D thread tiling and matrix transpose |
+| Custom GEMM Kernel V06 Vectorized | 20.1649  | 2D block tiling and 2D warp tiling and 2D thread tiling and matrix transpose with vectorized memory access |
 
-For FP16 GEMM kernels, the accumulation precision is currently using FP16 which results in a large discrepancy from the cuBLAS GEMM kernels which use FP32 for accumulation. Use FP32 for accumulation and then cast to FP16 at the end.
-
-compute-sanitizer --tool memcheck build/src/profile_cuda_gemm
-
-## Performance on RTX 3090
+### FP16 GEMM
 
 Device Name: NVIDIA GeForce RTX 3090
 Memory Size: 23.6694 GB
@@ -161,3 +188,7 @@ Latency: 7.11953 ms
 Effective Bandwidth: 28.2781 GB/s
 Effective TFLOPS: 19.3045 TFLOPS
 Custom GEMM VS cuBLAS GEMM Performance: 82.057%
+
+```
+
+```
