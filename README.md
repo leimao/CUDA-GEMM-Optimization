@@ -53,7 +53,7 @@ All the experiments are conducted on a single NVIDIA GeForce RTX 3090 GPU. The p
 
 ### FP32 GEMM
 
-All the FP32 GEMM kernels cannot utilize the Tensor Cores.
+All the FP32 GEMM kernels cannot utilize the NVIDIA Tensor Cores.
 
 | GEMM Kernel                       | TFLOPS   |                                                                                         Kernel Description |
 | :-------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------: |
@@ -73,7 +73,7 @@ All the FP32 GEMM kernels cannot utilize the Tensor Cores.
 
 ### FP16 GEMM
 
-The FP16 custom GEMM kernels V00 to V06 do not utilize the Tensor Cores. The FP16 cuBLAS GEMM kernel and custom GEMM kernels V07 utilize the Tensor Cores.
+The FP16 custom GEMM kernels V00 to V06 do not utilize the NVIDIA Tensor Cores. The FP16 cuBLAS GEMM kernel and custom GEMM kernels V07 utilize the NVIDIA Tensor Cores.
 
 | GEMM Kernel                       | TFLOPS   |                                                                                         Kernel Description |
 | :-------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------: |
