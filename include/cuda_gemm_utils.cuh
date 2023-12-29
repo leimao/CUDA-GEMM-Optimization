@@ -3,19 +3,14 @@
 
 #include <cuda_runtime.h>
 
-#define CHECK_CUDA_ERROR(val) check_cuda((val), #val, __FILE__, __LINE__)
-void check_cuda(cudaError_t err, const char* const func, const char* const file,
-                const int line);
-
-#define CHECK_LAST_CUDA_ERROR() check_cuda_last(__FILE__, __LINE__)
-void check_cuda_last(const char* const file, const int line);
+#include "cuda_gemm_utils.hpp"
 
 template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
-          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS>
+          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS, size_t BLOCK_TILE_SKEW_SIZE_X = 0U, size_t BLOCK_TILE_SKEW_SIZE_K = 0U>
 __device__ void load_data_to_shared_memory(T const* A, size_t lda,
                                            T const* B, size_t ldb,
-                                           T A_thread_block_tile[BLOCK_TILE_SIZE_Y][BLOCK_TILE_SIZE_K],
-                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X],
+                                           T A_thread_block_tile[BLOCK_TILE_SIZE_Y][BLOCK_TILE_SIZE_K + BLOCK_TILE_SKEW_SIZE_K],
+                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X + BLOCK_TILE_SKEW_SIZE_X],
                                            size_t thread_block_tile_idx,
                                            size_t thread_linear_idx,
                                            size_t m, size_t n,
@@ -106,11 +101,11 @@ __device__ void load_data_to_shared_memory(T const* A, size_t lda,
 }
 
 template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
-          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS>
+          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS, size_t BLOCK_TILE_SKEW_SIZE_X = 0U, size_t BLOCK_TILE_SKEW_SIZE_Y = 0U>
 __device__ void load_data_to_shared_memory_transposed(T const* A, size_t lda,
                                            T const* B, size_t ldb,
-                                           T A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_Y],
-                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X],
+                                           T A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_Y + BLOCK_TILE_SKEW_SIZE_Y],
+                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X + BLOCK_TILE_SKEW_SIZE_X],
                                            size_t thread_block_tile_idx,
                                            size_t thread_linear_idx,
                                            size_t m, size_t n,
@@ -205,11 +200,11 @@ __device__ void load_data_to_shared_memory_transposed(T const* A, size_t lda,
 }
 
 template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
-          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS, typename VECTOR_TYPE = int4>
+          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS, size_t BLOCK_TILE_SKEW_SIZE_X = 0U, size_t BLOCK_TILE_SKEW_SIZE_K = 0U, typename VECTOR_TYPE = int4>
 __device__ void load_data_to_shared_memory_vectorized(T const* A, size_t lda,
                                            T const* B, size_t ldb,
-                                           T A_thread_block_tile[BLOCK_TILE_SIZE_Y][BLOCK_TILE_SIZE_K],
-                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X],
+                                           T A_thread_block_tile[BLOCK_TILE_SIZE_Y][BLOCK_TILE_SIZE_K + BLOCK_TILE_SKEW_SIZE_K],
+                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X + BLOCK_TILE_SKEW_SIZE_X],
                                            size_t thread_block_tile_idx,
                                            size_t thread_linear_idx,
                                            size_t m, size_t n,
@@ -225,6 +220,13 @@ __device__ void load_data_to_shared_memory_vectorized(T const* A, size_t lda,
     constexpr size_t VECTORIZED_BLOCK_TILE_SIZE_X{BLOCK_TILE_SIZE_X /
                                                   NUM_VECTOR_UNITS};
     static_assert(BLOCK_TILE_SIZE_X % NUM_VECTOR_UNITS == 0U);
+
+    // The skew size could affect the data alignment in shared memory when we use vectorized load.
+    // We need to make sure the data alignment is correct.
+    static_assert((BLOCK_TILE_SIZE_K) * sizeof(T) % sizeof(VECTOR_TYPE) == 0U);
+    static_assert((BLOCK_TILE_SIZE_X) * sizeof(T) % sizeof(VECTOR_TYPE) == 0U);
+    static_assert((BLOCK_TILE_SIZE_K + BLOCK_TILE_SKEW_SIZE_K) * sizeof(T) % sizeof(VECTOR_TYPE) == 0U);
+    static_assert((BLOCK_TILE_SIZE_X + BLOCK_TILE_SKEW_SIZE_X) * sizeof(T) % sizeof(VECTOR_TYPE) == 0U);
 
 // Load data from A on DRAM to A_thread_block_tile on shared memory.
 #pragma unroll
@@ -339,11 +341,11 @@ __device__ void load_data_to_shared_memory_vectorized(T const* A, size_t lda,
 
 
 template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
-          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS, typename VECTOR_TYPE = int4>
+          size_t BLOCK_TILE_SIZE_K, size_t NUM_THREADS, size_t BLOCK_TILE_SKEW_SIZE_X = 0U, size_t BLOCK_TILE_SKEW_SIZE_Y = 0U, typename VECTOR_TYPE = int4>
 __device__ void load_data_to_shared_memory_transposed_vectorized(T const* A, size_t lda,
                                            T const* B, size_t ldb,
-                                           T A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_Y],
-                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X],
+                                           T A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_Y + BLOCK_TILE_SKEW_SIZE_Y],
+                                           T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X + BLOCK_TILE_SKEW_SIZE_X],
                                            size_t thread_block_tile_idx,
                                            size_t thread_linear_idx,
                                            size_t m, size_t n,
@@ -359,6 +361,13 @@ __device__ void load_data_to_shared_memory_transposed_vectorized(T const* A, siz
     constexpr size_t VECTORIZED_BLOCK_TILE_SIZE_X{BLOCK_TILE_SIZE_X /
                                                   NUM_VECTOR_UNITS};
     static_assert(BLOCK_TILE_SIZE_X % NUM_VECTOR_UNITS == 0U);
+
+    // The skew size could affect the data alignment in shared memory when we use vectorized load.
+    // We need to make sure the data alignment is correct.
+    static_assert((BLOCK_TILE_SIZE_Y) * sizeof(T) % sizeof(VECTOR_TYPE) == 0U);
+    static_assert((BLOCK_TILE_SIZE_X) * sizeof(T) % sizeof(VECTOR_TYPE) == 0U);
+    static_assert((BLOCK_TILE_SIZE_Y + BLOCK_TILE_SKEW_SIZE_Y) * sizeof(T) % sizeof(VECTOR_TYPE) == 0U);
+    static_assert((BLOCK_TILE_SIZE_X + BLOCK_TILE_SKEW_SIZE_X) * sizeof(T) % sizeof(VECTOR_TYPE) == 0U);
 
 // Load data from A on DRAM to A_thread_block_tile on shared memory.
 #pragma unroll

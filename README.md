@@ -1,157 +1,98 @@
-# CUDA-GEMM-Optimization
+# CUDA GEMM Optimization
 
-$ docker build -f docker/gemm-cuda.Dockerfile --no-cache --tag=gemm-cuda:0.0.1 .
-$ docker run -it --rm --gpus device=0 -v $(pwd):/mnt gemm-cuda:0.0.1
+## Introduction
 
-cmake -B build
+This repository contains the CUDA kernels for general matrix-matrix multiplication (GEMM) and the corresponding performance analysis. The correctness of the CUDA kernels is guaranteed for any matrix size. The parameters of the CUDA kernels are slightly turned for GEMM 4096 x 4096 x 4096 on an NVIDIA GeForce RTX 3090 GPU. The CUDA kernels should be compatible with any NVIDIA GPUs with compute capability 7.0 or higher.
 
-cmake --build build --config Release --parallel
+## Usages
 
-cmake --install build
+Docker is used to build and run the CUDA kernels. The custom Docker container is built based on the [NVIDIA NGC CUDA](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/cuda) 12.2.2 Docker container.
 
-TODO
+Please adjust the base Docker container CUDA version if the host computer has a different CUDA version. Otherwise, weird compilation errors and runtime errors may occur.
 
-For FP16 GEMM kernels, the accumulation precision is currently using FP16 which results in a large discrepancy from the cuBLAS GEMM kernels which use FP32 for accumulation. Use FP32 for accumulation and then cast to FP16 at the end.
+### Build Docker Images
 
-## Performance on RTX 3090
+To build the custom Docker image, please run the following command.
 
-Device Name: NVIDIA GeForce RTX 3090
-Memory Size: 23.6694 GB
-Peak Bandwitdh: 936.096 GB/s
+```bash
+$ docker build -f docker/gemm-cuda.Dockerfile --no-cache --tag=gemm-cuda:12.2.2 .
+```
 
-Matrix Size: M = 4096 N = 4096 K = 4096
-Matrix A: 4096 x 4096 Leading Dimension Size = 4096
-Matrix B: 4096 x 4096 Leading Dimension Size = 4096
-Matrix C: 4096 x 4096 Leading Dimension Size = 4096
+### Run Docker Container
 
-Custom GEMM Kernel V00
-cuBLAS GEMM Kernel Performance
-Latency: 5.79728 ms
-Effective Bandwidth: 34.7277 GB/s
-Effective TFLOPS: 23.7075 TFLOPS
-Custom GEMM Kernel Performance
-Latency: 450.354 ms
-Effective Bandwidth: 0.447041 GB/s
-Effective TFLOPS: 0.30518 TFLOPS
-Custom GEMM VS cuBLAS GEMM Performance: 1.28727%
+To run the custom Docker container, please run the following command.
 
-Custom GEMM Kernel V01
-cuBLAS GEMM Kernel Performance
-Latency: 5.48152 ms
-Effective Bandwidth: 36.7282 GB/s
-Effective TFLOPS: 25.0731 TFLOPS
-Custom GEMM Kernel Performance
-Latency: 77.9926 ms
-Effective Bandwidth: 2.58135 GB/s
-Effective TFLOPS: 1.7622 TFLOPS
-Custom GEMM VS cuBLAS GEMM Performance: 7.02826%
+```bash
+$ docker run -it --rm --gpus device=0 -v $(pwd):/mnt gemm-cuda:12.2.2
+```
 
-Custom GEMM Kernel V02
-cuBLAS GEMM Kernel Performance
-Latency: 5.68612 ms
-Effective Bandwidth: 35.4067 GB/s
-Effective TFLOPS: 24.171 TFLOPS
-Custom GEMM Kernel Performance
-Latency: 50.22 ms
-Effective Bandwidth: 4.00889 GB/s
-Effective TFLOPS: 2.73674 TFLOPS
-Custom GEMM VS cuBLAS GEMM Performance: 11.3224%
+If we want to profile the CUDA kernels using [NVIDIA Nsight Compute](/blog/Docker-Nsight-Compute/), we need to add additional flags `--cap-add=SYS_ADMIN` and `--security-opt seccomp=unconfined` when we run the Docker container.
 
-Custom GEMM Kernel V02 Vectorized
-cuBLAS GEMM Kernel Performance
-Latency: 5.84642 ms
-Effective Bandwidth: 34.4359 GB/s
-Effective TFLOPS: 23.5082 TFLOPS
-Custom GEMM Kernel Performance
-Latency: 71.5583 ms
-Effective Bandwidth: 2.81346 GB/s
-Effective TFLOPS: 1.92066 TFLOPS
-Custom GEMM VS cuBLAS GEMM Performance: 8.17015%
+### Build CUDA Kernels
 
-Custom GEMM Kernel V03
-cuBLAS GEMM Kernel Performance
-Latency: 5.83081 ms
-Effective Bandwidth: 34.5281 GB/s
-Effective TFLOPS: 23.5712 TFLOPS
-Custom GEMM Kernel Performance
-Latency: 17.024 ms
-Effective Bandwidth: 11.8261 GB/s
-Effective TFLOPS: 8.07326 TFLOPS
-Custom GEMM VS cuBLAS GEMM Performance: 34.2506%
+To build the CUDA kernels, please run the following commands inside the Docker container.
 
-Custom GEMM Kernel V03 Vectorized
-cuBLAS GEMM Kernel Performance
-Latency: 5.56675 ms
-Effective Bandwidth: 36.1659 GB/s
-Effective TFLOPS: 24.6892 TFLOPS
-Custom GEMM Kernel Performance
-Latency: 31.7553 ms
-Effective Bandwidth: 6.33994 GB/s
-Effective TFLOPS: 4.32807 TFLOPS
-Custom GEMM VS cuBLAS GEMM Performance: 17.5302%
+```bash
+$ cmake -B build
+$ cmake --build build --config Release --parallel
+$ cmake --install build
+```
 
-Custom GEMM Kernel V04
-cuBLAS GEMM Kernel Performance
-Latency: 5.53805 ms
-Effective Bandwidth: 36.3533 GB/s
-Effective TFLOPS: 24.8172 TFLOPS
-Custom GEMM Kernel Performance
-Latency: 9.38423 ms
-Effective Bandwidth: 21.4537 GB/s
-Effective TFLOPS: 14.6457 TFLOPS
-Custom GEMM VS cuBLAS GEMM Performance: 59.0144%
+### Run CUDA Kernels
 
-Custom GEMM Kernel V04 Vectorized
-cuBLAS GEMM Kernel Performance
-Latency: 5.63644 ms
-Effective Bandwidth: 35.7187 GB/s
-Effective TFLOPS: 24.384 TFLOPS
-Custom GEMM Kernel Performance
-Latency: 9.9268 ms
-Effective Bandwidth: 20.2811 GB/s
-Effective TFLOPS: 13.8452 TFLOPS
-Custom GEMM VS cuBLAS GEMM Performance: 56.78%
+To run the FP32 and FP16 GEMM CUDA kernels, please run the following commands inside the Docker container.
 
-Custom GEMM Kernel V05
-cuBLAS GEMM Kernel Performance
-Latency: 5.78575 ms
-Effective Bandwidth: 34.797 GB/s
-Effective TFLOPS: 23.7547 TFLOPS
-Custom GEMM Kernel Performance
-Latency: 9.89891 ms
-Effective Bandwidth: 20.3383 GB/s
-Effective TFLOPS: 13.8843 TFLOPS
-Custom GEMM VS cuBLAS GEMM Performance: 58.4484%
+```bash
+$ ./build/src/profile_cuda_gemm_fp32
+$ ./build/src/profile_cuda_gemm_fp16
+```
 
-Custom GEMM Kernel V05 Vectorized
-cuBLAS GEMM Kernel Performance
-Latency: 5.91288 ms
-Effective Bandwidth: 34.0488 GB/s
-Effective TFLOPS: 23.244 TFLOPS
-Custom GEMM Kernel Performance
-Latency: 7.06867 ms
-Effective Bandwidth: 28.4815 GB/s
-Effective TFLOPS: 19.4434 TFLOPS
-Custom GEMM VS cuBLAS GEMM Performance: 83.6492%
+## Performances
 
-Custom GEMM Kernel V06
-cuBLAS GEMM Kernel Performance
-Latency: 5.58623 ms
-Effective Bandwidth: 36.0398 GB/s
-Effective TFLOPS: 24.6032 TFLOPS
-Custom GEMM Kernel Performance
-Latency: 9.63915 ms
-Effective Bandwidth: 20.8863 GB/s
-Effective TFLOPS: 14.2584 TFLOPS
-Custom GEMM VS cuBLAS GEMM Performance: 57.9535%
+All the experiments are conducted on a single NVIDIA GeForce RTX 3090 GPU. The performance can vary, sometimes up to 25%, from one measurement to another.
 
-Custom GEMM Kernel V06 Vectorized
-cuBLAS GEMM Kernel Performance
-Latency: 5.84207 ms
-Effective Bandwidth: 34.4615 GB/s
-Effective TFLOPS: 23.5257 TFLOPS
-Custom GEMM Kernel Performance
-Latency: 7.11953 ms
-Effective Bandwidth: 28.2781 GB/s
-Effective TFLOPS: 19.3045 TFLOPS
-Custom GEMM VS cuBLAS GEMM Performance: 82.057%
+### FP32 GEMM
+
+All the FP32 GEMM kernels cannot utilize the NVIDIA Tensor Cores.
+
+| GEMM Kernel                       | TFLOPS   |                                                                                         Kernel Description |
+| :-------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------: |
+| cuBLAS GEMM Kernel                | 24.5971  |                                                                                      cuBLAS implementation |
+| Custom GEMM Kernel V00            | 0.278129 |                                                                         Non-coalesced global memory access |
+| Custom GEMM Kernel V01            | 1.7218   |                                                                             Coalesced global memory access |
+| Custom GEMM Kernel V02            | 2.66157  |                                                                                            2D block tiling |
+| Custom GEMM Kernel V02 Vectorized | 1.90514  |                                                              2D block tiling with vectorized memory access |
+| Custom GEMM Kernel V03            | 8.91318  |                                                                       2D block tiling and 1D thread tiling |
+| Custom GEMM Kernel V03 Vectorized | 4.04796  |                                         2D block tiling and 1D thread tiling with vectorized memory access |
+| Custom GEMM Kernel V04            | 13.0247  |                                                                       2D block tiling and 2D thread tiling |
+| Custom GEMM Kernel V04 Vectorized | 15.027   |                                         2D block tiling and 2D thread tiling with vectorized memory access |
+| Custom GEMM Kernel V05            | 11.1448  |                                                  2D block tiling and 2D thread tiling and matrix transpose |
+| Custom GEMM Kernel V05 Vectorized | 19.6688  |                    2D block tiling and 2D thread tiling and matrix transpose with vectorized memory access |
+| Custom GEMM Kernel V06            | 11.0703  |                               2D block tiling and 2D warp tiling and 2D thread tiling and matrix transpose |
+| Custom GEMM Kernel V06 Vectorized | 20.1649  | 2D block tiling and 2D warp tiling and 2D thread tiling and matrix transpose with vectorized memory access |
+
+### FP16 GEMM
+
+The FP16 custom GEMM kernels V00 to V06 do not utilize the NVIDIA Tensor Cores. The FP16 cuBLAS GEMM kernel and custom GEMM kernels V07 utilize the NVIDIA Tensor Cores.
+
+| GEMM Kernel                       | TFLOPS   |                                                                                         Kernel Description |
+| :-------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------: |
+| cuBLAS GEMM Kernel                | 138.955  |                                                                                      cuBLAS implementation |
+| Custom GEMM Kernel V00            | 0.284095 |                                                                         Non-coalesced global memory access |
+| Custom GEMM Kernel V01            | 1.7316   |                                                                             Coalesced global memory access |
+| Custom GEMM Kernel V02            | 2.46677  |                                                                                       2D block tiling GEMM |
+| Custom GEMM Kernel V02 Vectorized | 1.93088  |                                                              2D block tiling with vectorized memory access |
+| Custom GEMM Kernel V03            | 8.67563  |                                                                  2D block tiling and 1D thread tiling GEMM |
+| Custom GEMM Kernel V03 Vectorized | 2.14047  |                                         2D block tiling and 1D thread tiling with vectorized memory access |
+| Custom GEMM Kernel V04            | 20.2746  |                                                                  2D block tiling and 2D thread tiling GEMM |
+| Custom GEMM Kernel V04 Vectorized | 22.9001  |                                         2D block tiling and 2D thread tiling with vectorized memory access |
+| Custom GEMM Kernel V05            | 18.3736  |                                             2D block tiling and 2D thread tiling and matrix transpose GEMM |
+| Custom GEMM Kernel V05 Vectorized | 27.962   |                    2D block tiling and 2D thread tiling and matrix transpose with vectorized memory access |
+| Custom GEMM Kernel V06            | 14.7622  |                          2D block tiling and 2D warp tiling and 2D thread tiling and matrix transpose GEMM |
+| Custom GEMM Kernel V06 Vectorized | 28.4588  | 2D block tiling and 2D warp tiling and 2D thread tiling and matrix transpose with vectorized memory access |
+| Custom GEMM Kernel V07            | 33.808   |                                           2D block tiling and 2D warp tiling and WMMA and matrix transpose |
+| Custom GEMM Kernel V07 Vectorized | 46.7866  |             2D block tiling and 2D warp tiling and WMMA and matrix transpose and vectorized memory access. |
+
+## References
+
+- [CUDA Matrix Multiplication Optimization](https://leimao.github.io/article/CUDA-Matrix-Multiplication-Optimization/)
