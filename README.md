@@ -26,7 +26,7 @@ To run the custom Docker container, please run the following command.
 $ docker run -it --rm --gpus device=0 -v $(pwd):/mnt gemm-cuda:12.2.2
 ```
 
-If we want to profile the CUDA kernels using [NVIDIA Nsight Compute](/blog/Docker-Nsight-Compute/), we need to add additional flags `--cap-add=SYS_ADMIN` and `--security-opt seccomp=unconfined` when we run the Docker container.
+If we want to profile the CUDA kernels using [NVIDIA Nsight Compute](https://leimao.github.io/blog/Docker-Nsight-Compute/), we need to add additional flags `--cap-add=SYS_ADMIN` and `--security-opt seccomp=unconfined` when we run the Docker container.
 
 ### Build CUDA Kernels
 
