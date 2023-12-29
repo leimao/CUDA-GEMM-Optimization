@@ -44,7 +44,7 @@ __global__ void gemm_v02(size_t m, size_t n, size_t k, T alpha, T const* A,
 #pragma unroll
         for (size_t k_i{0U}; k_i < BLOCK_TILE_SIZE_K; ++k_i)
         {
-            // Doing this reulst in 2 TOPS.
+            // Doing this results in 2 TOPS.
             // Suppose blockDim.x = blockDim.y = 32.
             // Effectively, for a warp, in one iteration, we read the value from
             // A_thread_block_tile at the same location on the shared memory
