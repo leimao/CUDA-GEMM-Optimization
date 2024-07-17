@@ -180,11 +180,8 @@ __global__ void gemm_v06(size_t m, size_t n, size_t k, T alpha, T const* A,
                 }
             }
         }
-        // We can use syncwarp now.
-        __syncwarp();
+        __syncthreads();
     }
-    // Need a synchronization before writing the results to DRAM.
-    __syncthreads();
 
 // Write the results to DRAM.
 #pragma unroll

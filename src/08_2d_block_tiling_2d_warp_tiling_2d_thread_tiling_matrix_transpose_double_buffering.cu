@@ -13,9 +13,9 @@ template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
           size_t WARP_TILE_SIZE_Y, size_t THREAD_TILE_SIZE_X,
           size_t THREAD_TILE_SIZE_Y, size_t NUM_THREADS_PER_WARP_X,
           size_t NUM_THREADS_PER_WARP_Y>
-__global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
-                                    T const* A, size_t lda, T const* B,
-                                    size_t ldb, T beta, T* C, size_t ldc)
+__global__ void gemm_v08(size_t m, size_t n, size_t k, T alpha, T const* A,
+                         size_t lda, T const* B, size_t ldb, T beta, T* C,
+                         size_t ldc)
 {
     static_assert(NUM_THREADS_PER_WARP_X * NUM_THREADS_PER_WARP_Y == 32U);
     constexpr size_t NUM_WARPS_X{BLOCK_TILE_SIZE_X / WARP_TILE_SIZE_X};
@@ -75,26 +75,15 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
                       [THREAD_TILE_SIZE_Y][THREAD_TILE_SIZE_X] = {
                           static_cast<T>(0)};
 
-    constexpr size_t NUM_VECTOR_UNITS{sizeof(int4) / sizeof(T)};
-    static_assert(sizeof(int4) % sizeof(T) == 0U);
-    static_assert(BLOCK_TILE_SIZE_K % NUM_VECTOR_UNITS == 0U);
-    static_assert(BLOCK_TILE_SIZE_X % NUM_VECTOR_UNITS == 0U);
-    constexpr size_t VECTORIZED_THREAD_TILE_SIZE_X{THREAD_TILE_SIZE_X /
-                                                   NUM_VECTOR_UNITS};
-    static_assert(THREAD_TILE_SIZE_X % NUM_VECTOR_UNITS == 0U);
-    constexpr size_t VECTORIZED_THREAD_TILE_SIZE_Y{THREAD_TILE_SIZE_Y /
-                                                   NUM_VECTOR_UNITS};
-    static_assert(THREAD_TILE_SIZE_Y % NUM_VECTOR_UNITS == 0U);
-
     for (size_t thread_block_tile_idx{0U};
          thread_block_tile_idx < num_thread_block_tiles;
          ++thread_block_tile_idx)
     {
-        load_data_to_shared_memory_transposed_vectorized<
-            T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
-            NUM_THREADS>(A, lda, B, ldb, A_thread_block_tile_transposed,
-                         B_thread_block_tile, thread_block_tile_idx,
-                         thread_linear_idx, m, n, k);
+        load_data_to_shared_memory_transposed<T, BLOCK_TILE_SIZE_X,
+                                              BLOCK_TILE_SIZE_Y,
+                                              BLOCK_TILE_SIZE_K, NUM_THREADS>(
+            A, lda, B, ldb, A_thread_block_tile_transposed, B_thread_block_tile,
+            thread_block_tile_idx, thread_linear_idx, m, n, k);
         __syncthreads();
 
 // Perform A[:, thread_block_tile_idx:BLOCK_TILE_SIZE_K] *
@@ -123,18 +112,14 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
                     thread_linear_row_idx_in_warp * THREAD_TILE_SIZE_Y};
                 size_t const A_thread_block_tile_col_idx{k_i};
 #pragma unroll
-                for (size_t thread_tile_y_vector_idx{0U};
-                     thread_tile_y_vector_idx < VECTORIZED_THREAD_TILE_SIZE_Y;
-                     ++thread_tile_y_vector_idx)
+                for (size_t thread_tile_y_idx{0U};
+                     thread_tile_y_idx < THREAD_TILE_SIZE_Y;
+                     ++thread_tile_y_idx)
                 {
-                    *reinterpret_cast<int4*>(
-                        &A_vals[thread_tile_repeat_row_idx]
-                               [thread_tile_y_vector_idx * NUM_VECTOR_UNITS]) =
-                        *reinterpret_cast<int4 const*>(
-                            &A_thread_block_tile_transposed
-                                [A_thread_block_tile_col_idx]
-                                [A_thread_block_tile_row_idx +
-                                 thread_tile_y_vector_idx * NUM_VECTOR_UNITS]);
+                    A_vals[thread_tile_repeat_row_idx][thread_tile_y_idx] =
+                        A_thread_block_tile_transposed
+                            [A_thread_block_tile_col_idx]
+                            [A_thread_block_tile_row_idx + thread_tile_y_idx];
                 }
             }
 #pragma unroll
@@ -149,18 +134,14 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
                         (WARP_TILE_SIZE_X / NUM_THREAD_TILES_PER_WARP_X) +
                     thread_linear_col_idx_in_warp * THREAD_TILE_SIZE_X};
 #pragma unroll
-                for (size_t thread_tile_x_vector_idx{0U};
-                     thread_tile_x_vector_idx < VECTORIZED_THREAD_TILE_SIZE_X;
-                     ++thread_tile_x_vector_idx)
+                for (size_t thread_tile_x_idx{0U};
+                     thread_tile_x_idx < THREAD_TILE_SIZE_X;
+                     ++thread_tile_x_idx)
                 {
-                    *reinterpret_cast<int4*>(
-                        &B_vals[thread_tile_repeat_col_idx]
-                               [thread_tile_x_vector_idx * NUM_VECTOR_UNITS]) =
-                        *reinterpret_cast<int4 const*>(
-                            &B_thread_block_tile[B_thread_block_tile_row_idx]
-                                                [B_thread_block_tile_col_idx +
-                                                 thread_tile_x_vector_idx *
-                                                     NUM_VECTOR_UNITS]);
+                    B_vals[thread_tile_repeat_col_idx][thread_tile_x_idx] =
+                        B_thread_block_tile[B_thread_block_tile_row_idx]
+                                           [B_thread_block_tile_col_idx +
+                                            thread_tile_x_idx];
                 }
             }
 
@@ -218,9 +199,9 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
                  thread_tile_y_idx < THREAD_TILE_SIZE_Y; ++thread_tile_y_idx)
             {
 #pragma unroll
-                for (size_t thread_tile_x_vector_idx{0U};
-                     thread_tile_x_vector_idx < VECTORIZED_THREAD_TILE_SIZE_X;
-                     ++thread_tile_x_vector_idx)
+                for (size_t thread_tile_x_idx{0U};
+                     thread_tile_x_idx < THREAD_TILE_SIZE_X;
+                     ++thread_tile_x_idx)
                 {
                     size_t const C_row_idx{
                         blockIdx.y * BLOCK_TILE_SIZE_Y +
@@ -235,27 +216,15 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
                         thread_tile_repeat_col_idx *
                             (WARP_TILE_SIZE_X / NUM_THREAD_TILES_PER_WARP_X) +
                         thread_linear_col_idx_in_warp * THREAD_TILE_SIZE_X +
-                        thread_tile_x_vector_idx * NUM_VECTOR_UNITS};
-
+                        thread_tile_x_idx};
                     if (C_row_idx < m && C_col_idx < n)
                     {
-                        int4 C_vals{*reinterpret_cast<int4 const*>(
-                            &C[C_row_idx * ldc + C_col_idx])};
-#pragma unroll
-                        for (size_t i{0U}; i < NUM_VECTOR_UNITS; ++i)
-                        {
-                            reinterpret_cast<T*>(&C_vals)[i] =
-                                alpha *
-                                    C_thread_results[thread_tile_repeat_row_idx]
+                        C[C_row_idx * ldc + C_col_idx] =
+                            alpha * C_thread_results[thread_tile_repeat_row_idx]
                                                     [thread_tile_repeat_col_idx]
                                                     [thread_tile_y_idx]
-                                                    [thread_tile_x_vector_idx *
-                                                         NUM_VECTOR_UNITS +
-                                                     i] +
-                                beta * reinterpret_cast<T const*>(&C_vals)[i];
-                        }
-                        *reinterpret_cast<int4*>(
-                            &C[C_row_idx * ldc + C_col_idx]) = C_vals;
+                                                    [thread_tile_x_idx] +
+                            beta * C[C_row_idx * ldc + C_col_idx];
                     }
                 }
             }
@@ -264,10 +233,10 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
 }
 
 template <typename T>
-void launch_gemm_kernel_v06_vectorized(size_t m, size_t n, size_t k,
-                                       T const* alpha, T const* A, size_t lda,
-                                       T const* B, size_t ldb, T const* beta,
-                                       T* C, size_t ldc, cudaStream_t stream)
+void launch_gemm_kernel_v08(size_t m, size_t n, size_t k, T const* alpha,
+                            T const* A, size_t lda, T const* B, size_t ldb,
+                            T const* beta, T* C, size_t ldc,
+                            cudaStream_t stream)
 {
     // Feel free to play with the block tile sizes.
     // The algorithm correctness should always be guaranteed.
@@ -305,25 +274,30 @@ void launch_gemm_kernel_v06_vectorized(size_t m, size_t n, size_t k,
         (static_cast<unsigned int>(m) + BLOCK_TILE_SIZE_Y - 1U) /
             BLOCK_TILE_SIZE_Y,
         1U};
-    gemm_v06_vectorized<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y,
-                        BLOCK_TILE_SIZE_K, WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y,
-                        THREAD_TILE_SIZE_X, THREAD_TILE_SIZE_Y,
-                        NUM_THREADS_PER_WARP_X, NUM_THREADS_PER_WARP_Y>
+    gemm_v08<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+             WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, THREAD_TILE_SIZE_X,
+             THREAD_TILE_SIZE_Y, NUM_THREADS_PER_WARP_X, NUM_THREADS_PER_WARP_Y>
         <<<grid_dim, block_dim, 0U, stream>>>(m, n, k, *alpha, A, lda, B, ldb,
                                               *beta, C, ldc);
     CHECK_LAST_CUDA_ERROR();
 }
 
 // Explicit instantiation.
-template void launch_gemm_kernel_v06_vectorized<float>(
-    size_t m, size_t n, size_t k, float const* alpha, float const* A,
-    size_t lda, float const* B, size_t ldb, float const* beta, float* C,
-    size_t ldc, cudaStream_t stream);
-template void launch_gemm_kernel_v06_vectorized<double>(
-    size_t m, size_t n, size_t k, double const* alpha, double const* A,
-    size_t lda, double const* B, size_t ldb, double const* beta, double* C,
-    size_t ldc, cudaStream_t stream);
-template void launch_gemm_kernel_v06_vectorized<__half>(
-    size_t m, size_t n, size_t k, __half const* alpha, __half const* A,
-    size_t lda, __half const* B, size_t ldb, __half const* beta, __half* C,
-    size_t ldc, cudaStream_t stream);
+template void launch_gemm_kernel_v08<float>(size_t m, size_t n, size_t k,
+                                            float const* alpha, float const* A,
+                                            size_t lda, float const* B,
+                                            size_t ldb, float const* beta,
+                                            float* C, size_t ldc,
+                                            cudaStream_t stream);
+template void launch_gemm_kernel_v08<double>(size_t m, size_t n, size_t k,
+                                             double const* alpha,
+                                             double const* A, size_t lda,
+                                             double const* B, size_t ldb,
+                                             double const* beta, double* C,
+                                             size_t ldc, cudaStream_t stream);
+template void launch_gemm_kernel_v08<__half>(size_t m, size_t n, size_t k,
+                                             __half const* alpha,
+                                             __half const* A, size_t lda,
+                                             __half const* B, size_t ldb,
+                                             __half const* beta, __half* C,
+                                             size_t ldc, cudaStream_t stream);

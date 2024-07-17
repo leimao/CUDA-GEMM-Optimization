@@ -13,7 +13,7 @@ template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
           size_t WARP_TILE_SIZE_Y, size_t THREAD_TILE_SIZE_X,
           size_t THREAD_TILE_SIZE_Y, size_t NUM_THREADS_PER_WARP_X,
           size_t NUM_THREADS_PER_WARP_Y>
-__global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
+__global__ void gemm_v08_vectorized(size_t m, size_t n, size_t k, T alpha,
                                     T const* A, size_t lda, T const* B,
                                     size_t ldb, T beta, T* C, size_t ldc)
 {
@@ -264,7 +264,7 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
 }
 
 template <typename T>
-void launch_gemm_kernel_v06_vectorized(size_t m, size_t n, size_t k,
+void launch_gemm_kernel_v08_vectorized(size_t m, size_t n, size_t k,
                                        T const* alpha, T const* A, size_t lda,
                                        T const* B, size_t ldb, T const* beta,
                                        T* C, size_t ldc, cudaStream_t stream)
@@ -305,7 +305,7 @@ void launch_gemm_kernel_v06_vectorized(size_t m, size_t n, size_t k,
         (static_cast<unsigned int>(m) + BLOCK_TILE_SIZE_Y - 1U) /
             BLOCK_TILE_SIZE_Y,
         1U};
-    gemm_v06_vectorized<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y,
+    gemm_v08_vectorized<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y,
                         BLOCK_TILE_SIZE_K, WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y,
                         THREAD_TILE_SIZE_X, THREAD_TILE_SIZE_Y,
                         NUM_THREADS_PER_WARP_X, NUM_THREADS_PER_WARP_Y>
@@ -315,15 +315,15 @@ void launch_gemm_kernel_v06_vectorized(size_t m, size_t n, size_t k,
 }
 
 // Explicit instantiation.
-template void launch_gemm_kernel_v06_vectorized<float>(
+template void launch_gemm_kernel_v08_vectorized<float>(
     size_t m, size_t n, size_t k, float const* alpha, float const* A,
     size_t lda, float const* B, size_t ldb, float const* beta, float* C,
     size_t ldc, cudaStream_t stream);
-template void launch_gemm_kernel_v06_vectorized<double>(
+template void launch_gemm_kernel_v08_vectorized<double>(
     size_t m, size_t n, size_t k, double const* alpha, double const* A,
     size_t lda, double const* B, size_t ldb, double const* beta, double* C,
     size_t ldc, cudaStream_t stream);
-template void launch_gemm_kernel_v06_vectorized<__half>(
+template void launch_gemm_kernel_v08_vectorized<__half>(
     size_t m, size_t n, size_t k, __half const* alpha, __half const* A,
     size_t lda, __half const* B, size_t ldb, __half const* beta, __half* C,
     size_t ldc, cudaStream_t stream);

@@ -30,6 +30,8 @@ add_library(
     06_2d_block_tiling_2d_warp_tiling_2d_thread_tiling_matrix_transpose_vectorized_memory_access.cu
     07_2d_block_tiling_2d_warp_tiling_2d_thread_tiling_matrix_transpose_wmma.cu
     07_2d_block_tiling_2d_warp_tiling_2d_thread_tiling_matrix_transpose_wmma_vectorized_memory_access.cu
+    08_2d_block_tiling_2d_warp_tiling_2d_thread_tiling_matrix_transpose_double_buffering.cu
+    08_2d_block_tiling_2d_warp_tiling_2d_thread_tiling_matrix_transpose_vectorized_memory_access_double_buffering.cu
 )
 
 # Add the include directory of the library to the include directories of the project
