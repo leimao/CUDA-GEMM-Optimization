@@ -26,8 +26,8 @@ int main()
     static_assert(ldb >= n);
     static_assert(ldc >= n);
 
-    std::cout << "Matrix Size: "
-              << "M = " << m << " N = " << n << " K = " << k << std::endl;
+    std::cout << "Matrix Size: " << "M = " << m << " N = " << n << " K = " << k
+              << std::endl;
     std::cout << "Matrix A: " << m << " x " << k
               << " Leading Dimension Size = " << lda << std::endl;
     std::cout << "Matrix B: " << k << " x " << n
