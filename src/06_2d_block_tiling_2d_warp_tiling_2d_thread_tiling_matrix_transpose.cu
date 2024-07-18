@@ -5,21 +5,22 @@
 #include "cuda_gemm_utils.hpp"
 
 template <typename T, size_t BLOCK_TILE_SIZE, size_t WARP_TILE_SIZE,
-          size_t NUM_THREADS_PER_WARP, size_t THREAD_TILE_SIZE>
+          size_t NUM_THREAD_TILES_PER_WARP, size_t THREAD_TILE_SIZE>
 __device__ void load_data_from_shared_memory_to_register_file(
     T const thread_block_tile[BLOCK_TILE_SIZE],
-    T register_values[NUM_THREADS_PER_WARP][THREAD_TILE_SIZE], size_t warp_idx,
-    size_t thread_idx)
+    T register_values[NUM_THREAD_TILES_PER_WARP][THREAD_TILE_SIZE],
+    size_t warp_idx, size_t thread_idx)
 {
     static_assert(BLOCK_TILE_SIZE % THREAD_TILE_SIZE == 0U);
 #pragma unroll
     for (size_t thread_tile_repeat_idx{0U};
-         thread_tile_repeat_idx < NUM_THREADS_PER_WARP;
+         thread_tile_repeat_idx < NUM_THREAD_TILES_PER_WARP;
          ++thread_tile_repeat_idx)
     {
         size_t const thread_block_tile_idx{
             warp_idx * WARP_TILE_SIZE +
-            thread_tile_repeat_idx * (WARP_TILE_SIZE / NUM_THREADS_PER_WARP) +
+            thread_tile_repeat_idx *
+                (WARP_TILE_SIZE / NUM_THREAD_TILES_PER_WARP) +
             thread_idx * THREAD_TILE_SIZE};
 #pragma unroll
         for (size_t thread_tile_idx{0U}; thread_tile_idx < THREAD_TILE_SIZE;
