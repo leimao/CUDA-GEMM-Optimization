@@ -46,23 +46,26 @@ int main()
                            size_t, __half const*, size_t, __half const*,
                            __half*, size_t, cudaStream_t)>>> const
         gemm_fp16_kernel_launch_functions{
-            {"Custom GEMM Kernel V00", launch_gemm_kernel_v00<__half>},
-            {"Custom GEMM Kernel V01", launch_gemm_kernel_v01<__half>},
-            {"Custom GEMM Kernel V02", launch_gemm_kernel_v02<__half>},
-            {"Custom GEMM Kernel V02 Vectorized",
-             launch_gemm_kernel_v02_vectorized<__half>},
-            {"Custom GEMM Kernel V03", launch_gemm_kernel_v03<__half>},
-            {"Custom GEMM Kernel V03 Vectorized",
-             launch_gemm_kernel_v03_vectorized<__half>},
-            {"Custom GEMM Kernel V04", launch_gemm_kernel_v04<__half>},
-            {"Custom GEMM Kernel V04 Vectorized",
-             launch_gemm_kernel_v04_vectorized<__half>},
-            {"Custom GEMM Kernel V05", launch_gemm_kernel_v05<__half>},
-            {"Custom GEMM Kernel V05 Vectorized",
-             launch_gemm_kernel_v05_vectorized<__half>},
+            // {"Custom GEMM Kernel V00", launch_gemm_kernel_v00<__half>},
+            // {"Custom GEMM Kernel V01", launch_gemm_kernel_v01<__half>},
+            // {"Custom GEMM Kernel V02", launch_gemm_kernel_v02<__half>},
+            // {"Custom GEMM Kernel V02 Vectorized",
+            //  launch_gemm_kernel_v02_vectorized<__half>},
+            // {"Custom GEMM Kernel V03", launch_gemm_kernel_v03<__half>},
+            // {"Custom GEMM Kernel V03 Vectorized",
+            //  launch_gemm_kernel_v03_vectorized<__half>},
+            // {"Custom GEMM Kernel V04", launch_gemm_kernel_v04<__half>},
+            // {"Custom GEMM Kernel V04 Vectorized",
+            //  launch_gemm_kernel_v04_vectorized<__half>},
+            // {"Custom GEMM Kernel V05", launch_gemm_kernel_v05<__half>},
+            // {"Custom GEMM Kernel V05 Vectorized",
+            //  launch_gemm_kernel_v05_vectorized<__half>},
             {"Custom GEMM Kernel V06", launch_gemm_kernel_v06<__half>},
             {"Custom GEMM Kernel V06 Vectorized",
-             launch_gemm_kernel_v06_vectorized<__half>}};
+             launch_gemm_kernel_v06_vectorized<__half>},
+            {"Custom GEMM Kernel V06 Vectorized Double Buffered",
+             launch_gemm_kernel_v06_vectorized_double_buffered<__half>},
+        };
 
     for (auto const& gemm_fp16_kernel_launch_function :
          gemm_fp16_kernel_launch_functions)
