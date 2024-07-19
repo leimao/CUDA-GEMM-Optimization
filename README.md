@@ -49,7 +49,7 @@ $ ./build/src/profile_cuda_gemm_fp16
 
 ## Performances
 
-All the experiments are conducted on a single NVIDIA GeForce RTX 3090 GPU. The performance can vary, sometimes up to 25%, from one measurement to another.
+All the experiments are conducted on a single NVIDIA [GeForce RTX 3090 GPU](https://www.nvidia.com/content/PDF/nvidia-ampere-ga-102-gpu-architecture-whitepaper-v2.1.pdf). The performance can vary, sometimes up to 25%, from one measurement to another.
 
 ### FP32 GEMM
 
