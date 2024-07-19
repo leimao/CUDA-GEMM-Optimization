@@ -86,6 +86,46 @@ __device__ void compute_thread_tile_results(
 }
 
 template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
+          size_t BLOCK_TILE_SIZE_K, size_t WARP_TILE_SIZE_X,
+          size_t WARP_TILE_SIZE_Y, size_t THREAD_TILE_SIZE_X,
+          size_t THREAD_TILE_SIZE_Y, size_t NUM_THREADS_PER_WARP_X,
+          size_t NUM_THREADS_PER_WARP_Y, size_t NUM_THREAD_TILES_PER_WARP_X,
+          size_t NUM_THREAD_TILES_PER_WARP_Y>
+__device__ void process_data_from_shared_memory_using_register_file_vectorized(
+    T A_vals[NUM_THREAD_TILES_PER_WARP_Y][THREAD_TILE_SIZE_Y],
+    T B_vals[NUM_THREAD_TILES_PER_WARP_X][THREAD_TILE_SIZE_X],
+    T C_thread_results[NUM_THREAD_TILES_PER_WARP_Y][NUM_THREAD_TILES_PER_WARP_X]
+                      [THREAD_TILE_SIZE_Y][THREAD_TILE_SIZE_X],
+    T const A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K]
+                                          [BLOCK_TILE_SIZE_Y],
+    T const B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X],
+    size_t warp_row_idx, size_t warp_col_idx, size_t thread_row_idx_in_warp,
+    size_t thread_col_idx_in_warp)
+{
+#pragma unroll
+    for (size_t k_i{0U}; k_i < BLOCK_TILE_SIZE_K; ++k_i)
+    {
+        // Load data from shared memory to register file for A.
+        load_data_from_shared_memory_to_register_file_vectorized<
+            T, BLOCK_TILE_SIZE_Y, WARP_TILE_SIZE_Y, NUM_THREADS_PER_WARP_Y,
+            THREAD_TILE_SIZE_Y>(A_thread_block_tile_transposed[k_i], A_vals,
+                                warp_row_idx, thread_row_idx_in_warp);
+        // Load data from shared memory to register file for B.
+        load_data_from_shared_memory_to_register_file_vectorized<
+            T, BLOCK_TILE_SIZE_X, WARP_TILE_SIZE_X, NUM_THREADS_PER_WARP_X,
+            THREAD_TILE_SIZE_X>(B_thread_block_tile[k_i], B_vals, warp_col_idx,
+                                thread_col_idx_in_warp);
+
+        // Compute NUM_THREAD_TILES_PER_WARP_Y *
+        // NUM_THREAD_TILES_PER_WARP_X outer products.
+        compute_thread_tile_results<T, NUM_THREAD_TILES_PER_WARP_X,
+                                    NUM_THREAD_TILES_PER_WARP_Y,
+                                    THREAD_TILE_SIZE_X, THREAD_TILE_SIZE_Y>(
+            A_vals, B_vals, C_thread_results);
+    }
+}
+
+template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
           size_t WARP_TILE_SIZE_X, size_t WARP_TILE_SIZE_Y,
           size_t THREAD_TILE_SIZE_X, size_t THREAD_TILE_SIZE_Y,
           size_t NUM_THREAD_TILES_PER_WARP_X,
@@ -175,7 +215,8 @@ template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
           size_t WARP_TILE_SIZE_Y, size_t THREAD_TILE_SIZE_X,
           size_t THREAD_TILE_SIZE_Y, size_t NUM_THREADS_PER_WARP_X,
           size_t NUM_THREADS_PER_WARP_Y>
-__global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
+__global__ void
+gemm_v06_vectorized_double_buffered(size_t m, size_t n, size_t k, T alpha,
                                     T const* A, size_t lda, T const* B,
                                     size_t ldb, T beta, T* C, size_t ldc)
 {
@@ -201,10 +242,23 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
     // Use a compile time constant instead.
     constexpr size_t NUM_THREADS{NUM_THREADS_X * NUM_THREADS_Y};
 
+    constexpr size_t NUM_PIPELINES{2U};
+    // Only double buffer is supported in the implementation.
+    // But even more number of pipelines can be supported if the implementation
+    // is modified.
+    static_assert(NUM_PIPELINES == 2U);
+    static_assert((NUM_WARPS_X * NUM_WARPS_Y) % NUM_PIPELINES == 0U);
+    static_assert(NUM_THREADS % NUM_PIPELINES == 0U);
+    constexpr size_t NUM_THREADS_PER_PIPELINE{NUM_THREADS / NUM_PIPELINES};
+    constexpr size_t NUM_WARPS_PER_PIPELINE{(NUM_WARPS_X * NUM_WARPS_Y) /
+                                            NUM_PIPELINES};
+
     // Cache a tile of A and B in shared memory for data reuse.
     __shared__ T
-        A_thread_block_tile_transposed[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_Y];
-    __shared__ T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X];
+        A_thread_block_tile_transposed[NUM_PIPELINES][BLOCK_TILE_SIZE_K]
+                                      [BLOCK_TILE_SIZE_Y];
+    __shared__ T B_thread_block_tile[NUM_PIPELINES][BLOCK_TILE_SIZE_K]
+                                    [BLOCK_TILE_SIZE_X];
 
     // A_vals is cached in the register.
     T A_vals[NUM_THREAD_TILES_PER_WARP_Y][THREAD_TILE_SIZE_Y] = {
@@ -222,6 +276,8 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
                                                NUM_THREADS_PER_WARP_X};
     size_t const thread_linear_col_idx_in_warp{thread_linear_idx_in_warp %
                                                NUM_THREADS_PER_WARP_X};
+    // Separate the warps to different pipelines.
+    size_t const pipeline_index{warp_linear_idx / NUM_WARPS_PER_PIPELINE};
 
     // Number of outer loops to perform the sum of inner products.
     // C_thread_block_tile =
@@ -237,52 +293,120 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
                       [THREAD_TILE_SIZE_Y][THREAD_TILE_SIZE_X] = {
                           static_cast<T>(0)};
 
-    for (size_t thread_block_tile_idx{0U};
-         thread_block_tile_idx < num_thread_block_tiles;
-         ++thread_block_tile_idx)
+    if (pipeline_index == 0U)
     {
+        // Pipeline 0 warps load buffer 0.
         load_data_from_global_memory_to_shared_memory_transposed_vectorized<
             T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
-            NUM_THREADS>(A, lda, B, ldb, A_thread_block_tile_transposed,
-                         B_thread_block_tile, thread_block_tile_idx,
-                         thread_linear_idx, m, n, k);
-        __syncthreads();
+            NUM_THREADS_PER_PIPELINE>(
+            A, lda, B, ldb, A_thread_block_tile_transposed[pipeline_index],
+            B_thread_block_tile[pipeline_index], 0U,
+            thread_linear_idx - pipeline_index * NUM_THREADS_PER_PIPELINE, m, n,
+            k);
+    }
+    __syncthreads();
 
-// Perform A[:, thread_block_tile_idx:BLOCK_TILE_SIZE_K] *
-// B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] where A[:,
-// thread_block_tile_idx:BLOCK_TILE_SIZE_K] and
-// B[thread_block_tile_idx:BLOCK_TILE_SIZE_K, :] are cached in the
-// shared memory as A_thread_block_tile and B_thread_block_tile,
-// respectively. This inner product is further decomposed to
-// BLOCK_TILE_SIZE_K outer products. A_thread_block_tile *
-// B_thread_block_tile = \sigma_{k_i=0}^{BLOCK_TILE_SIZE_K-1}
-// A_thread_block_tile[:, k_i] @ B_thread_block_tile[k_i, :] Note that
-// both A_thread_block_tile and B_thread_block_tile can be cached in the
-// register.
-#pragma unroll
-        for (size_t k_i{0U}; k_i < BLOCK_TILE_SIZE_K; ++k_i)
+    for (size_t thread_block_tile_idx{0U};
+         thread_block_tile_idx < num_thread_block_tiles;
+         thread_block_tile_idx += NUM_PIPELINES)
+    {
+        if (pipeline_index == 0U)
         {
-            // Load data from shared memory to register file for A.
-            load_data_from_shared_memory_to_register_file_vectorized<
-                T, BLOCK_TILE_SIZE_Y, WARP_TILE_SIZE_Y, NUM_THREADS_PER_WARP_Y,
-                THREAD_TILE_SIZE_Y>(A_thread_block_tile_transposed[k_i], A_vals,
-                                    warp_row_idx,
-                                    thread_linear_row_idx_in_warp);
-            // Load data from shared memory to register file for B.
-            load_data_from_shared_memory_to_register_file_vectorized<
-                T, BLOCK_TILE_SIZE_X, WARP_TILE_SIZE_X, NUM_THREADS_PER_WARP_X,
-                THREAD_TILE_SIZE_X>(B_thread_block_tile[k_i], B_vals,
-                                    warp_col_idx,
-                                    thread_linear_col_idx_in_warp);
+            // Pipeline 0 warps process buffer 0.
+            process_data_from_shared_memory_using_register_file_vectorized<
+                T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+                WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, THREAD_TILE_SIZE_X,
+                THREAD_TILE_SIZE_Y, NUM_THREADS_PER_WARP_X,
+                NUM_THREADS_PER_WARP_Y, NUM_THREAD_TILES_PER_WARP_X,
+                NUM_THREAD_TILES_PER_WARP_Y>(
+                A_vals, B_vals, C_thread_results,
+                A_thread_block_tile_transposed[pipeline_index],
+                B_thread_block_tile[pipeline_index], warp_row_idx, warp_col_idx,
+                thread_linear_row_idx_in_warp, thread_linear_col_idx_in_warp);
+            __syncthreads();
 
-            // Compute NUM_THREAD_TILES_PER_WARP_Y * NUM_THREAD_TILES_PER_WARP_X
-            // outer products.
-            compute_thread_tile_results<T, NUM_THREAD_TILES_PER_WARP_X,
-                                        NUM_THREAD_TILES_PER_WARP_Y,
-                                        THREAD_TILE_SIZE_X, THREAD_TILE_SIZE_Y>(
-                A_vals, B_vals, C_thread_results);
+            // Pipeline 0 warps process buffer 1.
+            if (thread_block_tile_idx + 1U < num_thread_block_tiles)
+            {
+                process_data_from_shared_memory_using_register_file_vectorized<
+                    T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+                    WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, THREAD_TILE_SIZE_X,
+                    THREAD_TILE_SIZE_Y, NUM_THREADS_PER_WARP_X,
+                    NUM_THREADS_PER_WARP_Y, NUM_THREAD_TILES_PER_WARP_X,
+                    NUM_THREAD_TILES_PER_WARP_Y>(
+                    A_vals, B_vals, C_thread_results,
+                    A_thread_block_tile_transposed[pipeline_index + 1],
+                    B_thread_block_tile[pipeline_index + 1], warp_row_idx,
+                    warp_col_idx, thread_linear_row_idx_in_warp,
+                    thread_linear_col_idx_in_warp);
+            }
+            __syncthreads();
+
+            // Pipeline 0 warps load buffer 0.
+            if (thread_block_tile_idx + 2U < num_thread_block_tiles)
+            {
+                load_data_from_global_memory_to_shared_memory_transposed_vectorized<
+                    T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+                    NUM_THREADS_PER_PIPELINE>(
+                    A, lda, B, ldb,
+                    A_thread_block_tile_transposed[pipeline_index],
+                    B_thread_block_tile[pipeline_index],
+                    thread_block_tile_idx + 2,
+                    thread_linear_idx -
+                        pipeline_index * NUM_THREADS_PER_PIPELINE,
+                    m, n, k);
+            }
+            __syncthreads();
         }
-        __syncthreads();
+        else
+        {
+            // Pipeline 1 warps load buffer 1.
+            if (thread_block_tile_idx + 1U < num_thread_block_tiles)
+            {
+                load_data_from_global_memory_to_shared_memory_transposed_vectorized<
+                    T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+                    NUM_THREADS_PER_PIPELINE>(
+                    A, lda, B, ldb,
+                    A_thread_block_tile_transposed[pipeline_index],
+                    B_thread_block_tile[pipeline_index],
+                    thread_block_tile_idx + 1,
+                    thread_linear_idx -
+                        pipeline_index * NUM_THREADS_PER_PIPELINE,
+                    m, n, k);
+            }
+            __syncthreads();
+
+            // Pipeline 1 warps process buffer 0.
+            process_data_from_shared_memory_using_register_file_vectorized<
+                T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+                WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, THREAD_TILE_SIZE_X,
+                THREAD_TILE_SIZE_Y, NUM_THREADS_PER_WARP_X,
+                NUM_THREADS_PER_WARP_Y, NUM_THREAD_TILES_PER_WARP_X,
+                NUM_THREAD_TILES_PER_WARP_Y>(
+                A_vals, B_vals, C_thread_results,
+                A_thread_block_tile_transposed[pipeline_index - 1],
+                B_thread_block_tile[pipeline_index - 1], warp_row_idx,
+                warp_col_idx, thread_linear_row_idx_in_warp,
+                thread_linear_col_idx_in_warp);
+            __syncthreads();
+
+            // Pipeline 1 warps process buffer 1.
+            if (thread_block_tile_idx + 1U < num_thread_block_tiles)
+            {
+                process_data_from_shared_memory_using_register_file_vectorized<
+                    T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+                    WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, THREAD_TILE_SIZE_X,
+                    THREAD_TILE_SIZE_Y, NUM_THREADS_PER_WARP_X,
+                    NUM_THREADS_PER_WARP_Y, NUM_THREAD_TILES_PER_WARP_X,
+                    NUM_THREAD_TILES_PER_WARP_Y>(
+                    A_vals, B_vals, C_thread_results,
+                    A_thread_block_tile_transposed[pipeline_index],
+                    B_thread_block_tile[pipeline_index], warp_row_idx,
+                    warp_col_idx, thread_linear_row_idx_in_warp,
+                    thread_linear_col_idx_in_warp);
+            }
+            __syncthreads();
+        }
     }
 
     // Write the results to DRAM.
@@ -296,10 +420,10 @@ __global__ void gemm_v06_vectorized(size_t m, size_t n, size_t k, T alpha,
 }
 
 template <typename T>
-void launch_gemm_kernel_v06_vectorized(size_t m, size_t n, size_t k,
-                                       T const* alpha, T const* A, size_t lda,
-                                       T const* B, size_t ldb, T const* beta,
-                                       T* C, size_t ldc, cudaStream_t stream)
+void launch_gemm_kernel_v06_vectorized_double_buffered(
+    size_t m, size_t n, size_t k, T const* alpha, T const* A, size_t lda,
+    T const* B, size_t ldb, T const* beta, T* C, size_t ldc,
+    cudaStream_t stream)
 {
     // Feel free to play with the block tile sizes.
     // The algorithm correctness should always be guaranteed.
@@ -337,25 +461,21 @@ void launch_gemm_kernel_v06_vectorized(size_t m, size_t n, size_t k,
         (static_cast<unsigned int>(m) + BLOCK_TILE_SIZE_Y - 1U) /
             BLOCK_TILE_SIZE_Y,
         1U};
-    gemm_v06_vectorized<T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y,
-                        BLOCK_TILE_SIZE_K, WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y,
-                        THREAD_TILE_SIZE_X, THREAD_TILE_SIZE_Y,
-                        NUM_THREADS_PER_WARP_X, NUM_THREADS_PER_WARP_Y>
+    gemm_v06_vectorized_double_buffered<
+        T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+        WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, THREAD_TILE_SIZE_X,
+        THREAD_TILE_SIZE_Y, NUM_THREADS_PER_WARP_X, NUM_THREADS_PER_WARP_Y>
         <<<grid_dim, block_dim, 0U, stream>>>(m, n, k, *alpha, A, lda, B, ldb,
                                               *beta, C, ldc);
     CHECK_LAST_CUDA_ERROR();
 }
 
 // Explicit instantiation.
-template void launch_gemm_kernel_v06_vectorized<float>(
+template void launch_gemm_kernel_v06_vectorized_double_buffered<float>(
     size_t m, size_t n, size_t k, float const* alpha, float const* A,
     size_t lda, float const* B, size_t ldb, float const* beta, float* C,
     size_t ldc, cudaStream_t stream);
-template void launch_gemm_kernel_v06_vectorized<double>(
-    size_t m, size_t n, size_t k, double const* alpha, double const* A,
-    size_t lda, double const* B, size_t ldb, double const* beta, double* C,
-    size_t ldc, cudaStream_t stream);
-template void launch_gemm_kernel_v06_vectorized<__half>(
+template void launch_gemm_kernel_v06_vectorized_double_buffered<__half>(
     size_t m, size_t n, size_t k, __half const* alpha, __half const* A,
     size_t lda, __half const* B, size_t ldb, __half const* beta, __half* C,
     size_t ldc, cudaStream_t stream);

@@ -29,8 +29,8 @@ int main()
     static_assert(ldb >= n);
     static_assert(ldc >= n);
 
-    std::cout << "Matrix Size: "
-              << "M = " << m << " N = " << n << " K = " << k << std::endl;
+    std::cout << "Matrix Size: " << "M = " << m << " N = " << n << " K = " << k
+              << std::endl;
     std::cout << "Matrix A: " << m << " x " << k
               << " Leading Dimension Size = " << lda << std::endl;
     std::cout << "Matrix B: " << k << " x " << n
@@ -62,7 +62,10 @@ int main()
              launch_gemm_kernel_v05_vectorized<__half>},
             {"Custom GEMM Kernel V06", launch_gemm_kernel_v06<__half>},
             {"Custom GEMM Kernel V06 Vectorized",
-             launch_gemm_kernel_v06_vectorized<__half>}};
+             launch_gemm_kernel_v06_vectorized<__half>},
+            {"Custom GEMM Kernel V06 Vectorized Double Buffered",
+             launch_gemm_kernel_v06_vectorized_double_buffered<__half>},
+        };
 
     for (auto const& gemm_fp16_kernel_launch_function :
          gemm_fp16_kernel_launch_functions)
@@ -83,7 +86,10 @@ int main()
         gemm_fp16_tensor_core_kernel_launch_functions{
             {"Custom GEMM Kernel V07", launch_gemm_kernel_v07<__half>},
             {"Custom GEMM Kernel V07 Vectorized",
-             launch_gemm_kernel_v07_vectorized<__half>}};
+             launch_gemm_kernel_v07_vectorized<__half>},
+            {"Custom GEMM Kernel V07 Vectorized Double Buffered",
+             launch_gemm_kernel_v07_vectorized_double_buffered<__half>},
+        };
 
     for (auto const& gemm_fp16_tensor_core_kernel_launch_function :
          gemm_fp16_tensor_core_kernel_launch_functions)

@@ -86,7 +86,7 @@ __global__ void gemm_v07(size_t m, size_t n, size_t k, T alpha, T const* A,
          thread_block_tile_idx < num_thread_block_tiles;
          ++thread_block_tile_idx)
     {
-        load_data_to_shared_memory_transposed<
+        load_data_from_global_memory_to_shared_memory_transposed<
             T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
             NUM_THREADS, BLOCK_TILE_SKEW_SIZE_X, BLOCK_TILE_SKEW_SIZE_Y>(
             A, lda, B, ldb, A_thread_block_tile_transposed, B_thread_block_tile,
@@ -119,20 +119,26 @@ __global__ void gemm_v07(size_t m, size_t n, size_t k, T alpha, T const* A,
                                                     wmma_tile_row_idx *
                                                         WMMA_TILE_SIZE_Y],
                     BLOCK_TILE_SIZE_Y + BLOCK_TILE_SKEW_SIZE_Y);
+            }
+#pragma unroll
+            for (size_t wmma_tile_col_idx{0U};
+                 wmma_tile_col_idx < NUM_WMMA_TILES_X; ++wmma_tile_col_idx)
+            {
+                nvcuda::wmma::load_matrix_sync(
+                    b_frags[wmma_tile_col_idx],
+                    &B_thread_block_tile[k_i * WMMA_TILE_SIZE_K]
+                                        [warp_col_idx * WARP_TILE_SIZE_X +
+                                         wmma_tile_col_idx * WMMA_TILE_SIZE_X],
+                    BLOCK_TILE_SIZE_X + BLOCK_TILE_SKEW_SIZE_X);
+            }
+#pragma unroll
+            for (size_t wmma_tile_row_idx{0U};
+                 wmma_tile_row_idx < NUM_WMMA_TILES_Y; ++wmma_tile_row_idx)
+            {
 #pragma unroll
                 for (size_t wmma_tile_col_idx{0U};
                      wmma_tile_col_idx < NUM_WMMA_TILES_X; ++wmma_tile_col_idx)
                 {
-                    // These loads are extremely slow somehow, which affects the
-                    // performance a lot. Load the fragment from shared memory.
-                    nvcuda::wmma::load_matrix_sync(
-                        b_frags[wmma_tile_col_idx],
-                        &B_thread_block_tile[k_i * WMMA_TILE_SIZE_K]
-                                            [warp_col_idx * WARP_TILE_SIZE_X +
-                                             wmma_tile_col_idx *
-                                                 WMMA_TILE_SIZE_Y],
-                        BLOCK_TILE_SIZE_X + BLOCK_TILE_SKEW_SIZE_X);
-
                     // Perform the matrix multiplication.
                     nvcuda::wmma::mma_sync(
                         acc_frags[wmma_tile_row_idx][wmma_tile_col_idx],
@@ -141,11 +147,8 @@ __global__ void gemm_v07(size_t m, size_t n, size_t k, T alpha, T const* A,
                 }
             }
         }
-        // We can use syncwarp now.
-        __syncwarp();
+        __syncthreads();
     }
-    // Need a synchronization before writing the results to DRAM.
-    __syncthreads();
 
 // Write the results to DRAM.
 #pragma unroll
@@ -156,7 +159,7 @@ __global__ void gemm_v07(size_t m, size_t n, size_t k, T alpha, T const* A,
         for (size_t wmma_tile_col_idx{0U}; wmma_tile_col_idx < NUM_WMMA_TILES_X;
              ++wmma_tile_col_idx)
         {
-            // Load the fragment from shared memory.
+            // Load the fragment from global memory.
             nvcuda::wmma::load_matrix_sync(
                 c_frag,
                 &C[(blockIdx.y * BLOCK_TILE_SIZE_Y +
@@ -175,7 +178,7 @@ __global__ void gemm_v07(size_t m, size_t n, size_t k, T alpha, T const* A,
                         acc_frags[wmma_tile_row_idx][wmma_tile_col_idx].x[i] +
                     beta * c_frag.x[i];
             }
-            // Store the fragment back to shared memory.
+            // Store the fragment back to global memory.
             nvcuda::wmma::store_matrix_sync(
                 &C[(blockIdx.y * BLOCK_TILE_SIZE_Y +
                     warp_row_idx * WARP_TILE_SIZE_Y +

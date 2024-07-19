@@ -26,8 +26,8 @@ int main()
     static_assert(ldb >= n);
     static_assert(ldc >= n);
 
-    std::cout << "Matrix Size: "
-              << "M = " << m << " N = " << n << " K = " << k << std::endl;
+    std::cout << "Matrix Size: " << "M = " << m << " N = " << n << " K = " << k
+              << std::endl;
     std::cout << "Matrix A: " << m << " x " << k
               << " Leading Dimension Size = " << lda << std::endl;
     std::cout << "Matrix B: " << k << " x " << n
@@ -59,7 +59,10 @@ int main()
              launch_gemm_kernel_v05_vectorized<float>},
             {"Custom GEMM Kernel V06", launch_gemm_kernel_v06<float>},
             {"Custom GEMM Kernel V06 Vectorized",
-             launch_gemm_kernel_v06_vectorized<float>}};
+             launch_gemm_kernel_v06_vectorized<float>},
+            {"Custom GEMM Kernel V06 Vectorized Double Buffered",
+             launch_gemm_kernel_v06_vectorized_double_buffered<float>},
+        };
 
     for (auto const& gemm_kernel_launch_function : gemm_kernel_launch_functions)
     {

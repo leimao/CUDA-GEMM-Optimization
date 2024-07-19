@@ -139,7 +139,8 @@ void launch_gemm_cpu(size_t m, size_t n, size_t k, T const* alpha, T const* A,
 }
 
 // Many different implementations have been tried for FP16 GEMM on CPU.
-// There is always a discrepancy between the results from CPU and GPU (cuBLAS or custom kernel).
+// There is always a discrepancy between the results from CPU and GPU (cuBLAS or
+// custom kernel).
 template <typename T, typename std::enable_if<std::is_same<T, __half>::value,
                                               bool>::type = true>
 void launch_gemm_cpu(size_t m, size_t n, size_t k, T const* alpha, T const* A,
@@ -228,7 +229,8 @@ float compute_effective_tflops(size_t m, size_t n, size_t k, float latency)
 
 template <typename T,
           typename std::enable_if<std::is_same<T, float>::value ||
-                                      std::is_same<T, double>::value || std::is_same<T, __half>::value,
+                                      std::is_same<T, double>::value ||
+                                      std::is_same<T, __half>::value,
                                   bool>::type = true>
 void random_initialize_matrix(T* A, size_t m, size_t n, size_t lda,
                               unsigned int seed = 0U)
