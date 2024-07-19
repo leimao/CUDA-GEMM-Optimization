@@ -308,7 +308,7 @@ gemm_v06_vectorized_double_buffered(size_t m, size_t n, size_t k, T alpha,
 
     for (size_t thread_block_tile_idx{0U};
          thread_block_tile_idx < num_thread_block_tiles;
-         thread_block_tile_idx += 2)
+         thread_block_tile_idx += NUM_PIPELINES)
     {
         if (pipeline_index == 0U)
         {

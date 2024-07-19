@@ -8,53 +8,6 @@
 // https://developer.nvidia.com/blog/cutlass-linear-algebra-cuda/
 // https://github.com/NVIDIA/cutlass/blob/b7508e337938137a699e486d8997646980acfc58/media/docs/programming_guidelines.md
 
-// #pragma unroll
-//         for (size_t k_i{0U}; k_i < NUM_WMMA_TILES_K; ++k_i)
-//         {
-// #pragma unroll
-//             for (size_t wmma_tile_row_idx{0U};
-//                  wmma_tile_row_idx < NUM_WMMA_TILES_Y; ++wmma_tile_row_idx)
-//             {
-//                 nvcuda::wmma::load_matrix_sync(
-//                     a_frags[wmma_tile_row_idx],
-//                     &A_thread_block_tile_transposed[k_i * WMMA_TILE_SIZE_K]
-//                                                    [warp_row_idx *
-//                                                         WARP_TILE_SIZE_Y +
-//                                                     wmma_tile_row_idx *
-//                                                         WMMA_TILE_SIZE_Y],
-//                     BLOCK_TILE_SIZE_Y + BLOCK_TILE_SKEW_SIZE_Y);
-//             }
-// #pragma unroll
-//             for (size_t wmma_tile_col_idx{0U};
-//                  wmma_tile_col_idx < NUM_WMMA_TILES_X; ++wmma_tile_col_idx)
-//             {
-//                 nvcuda::wmma::load_matrix_sync(
-//                     b_frags[wmma_tile_col_idx],
-//                     &B_thread_block_tile[k_i * WMMA_TILE_SIZE_K]
-//                                         [warp_col_idx * WARP_TILE_SIZE_X +
-//                                          wmma_tile_col_idx *
-//                                          WMMA_TILE_SIZE_X],
-//                     BLOCK_TILE_SIZE_X + BLOCK_TILE_SKEW_SIZE_X);
-//             }
-// #pragma unroll
-//             for (size_t wmma_tile_row_idx{0U};
-//                  wmma_tile_row_idx < NUM_WMMA_TILES_Y; ++wmma_tile_row_idx)
-//             {
-// #pragma unroll
-//                 for (size_t wmma_tile_col_idx{0U};
-//                      wmma_tile_col_idx < NUM_WMMA_TILES_X;
-//                      ++wmma_tile_col_idx)
-//                 {
-//                     // Perform the matrix multiplication.
-//                     nvcuda::wmma::mma_sync(
-//                         acc_frags[wmma_tile_row_idx][wmma_tile_col_idx],
-//                         a_frags[wmma_tile_row_idx],
-//                         b_frags[wmma_tile_col_idx],
-//                         acc_frags[wmma_tile_row_idx][wmma_tile_col_idx]);
-//                 }
-//             }
-//         }
-
 template <
     typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
     size_t BLOCK_TILE_SIZE_K, size_t WARP_TILE_SIZE_X, size_t WARP_TILE_SIZE_Y,
@@ -232,25 +185,104 @@ gemm_v07_vectorized_double_buffered(size_t m, size_t n, size_t k, T alpha,
 
     for (size_t thread_block_tile_idx{0U};
          thread_block_tile_idx < num_thread_block_tiles;
-         ++thread_block_tile_idx)
+         thread_block_tile_idx += NUM_PIPELINES)
     {
-        load_data_from_global_memory_to_shared_memory_transposed_vectorized<
-            T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
-            NUM_THREADS, BLOCK_TILE_SKEW_SIZE_X, BLOCK_TILE_SKEW_SIZE_Y>(
-            A, lda, B, ldb, A_thread_block_tile_transposed[0],
-            B_thread_block_tile[0], thread_block_tile_idx, thread_linear_idx, m,
-            n, k);
-        __syncthreads();
+        if (pipeline_index == 0U)
+        {
+            // Pipeline 0 warps process buffer 0.
+            process_data_from_shared_memory_using_wmma<
+                T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+                WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, WMMA_TILE_SIZE_X,
+                WMMA_TILE_SIZE_Y, WMMA_TILE_SIZE_K, NUM_WMMA_TILES_X,
+                NUM_WMMA_TILES_Y, NUM_WMMA_TILES_K, BLOCK_TILE_SKEW_SIZE_X,
+                BLOCK_TILE_SKEW_SIZE_Y>(
+                a_frags, b_frags, acc_frags,
+                A_thread_block_tile_transposed[pipeline_index],
+                B_thread_block_tile[pipeline_index], warp_row_idx,
+                warp_col_idx);
+            __syncthreads();
 
-        process_data_from_shared_memory_using_wmma<
-            T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
-            WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, WMMA_TILE_SIZE_X,
-            WMMA_TILE_SIZE_Y, WMMA_TILE_SIZE_K, NUM_WMMA_TILES_X,
-            NUM_WMMA_TILES_Y, NUM_WMMA_TILES_K, BLOCK_TILE_SKEW_SIZE_X,
-            BLOCK_TILE_SKEW_SIZE_Y>(
-            a_frags, b_frags, acc_frags, A_thread_block_tile_transposed[0],
-            B_thread_block_tile[0], warp_row_idx, warp_col_idx);
-        __syncthreads();
+            // Pipeline 0 warps process buffer 1.
+            if (thread_block_tile_idx + 1U < num_thread_block_tiles)
+            {
+                process_data_from_shared_memory_using_wmma<
+                    T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+                    WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, WMMA_TILE_SIZE_X,
+                    WMMA_TILE_SIZE_Y, WMMA_TILE_SIZE_K, NUM_WMMA_TILES_X,
+                    NUM_WMMA_TILES_Y, NUM_WMMA_TILES_K, BLOCK_TILE_SKEW_SIZE_X,
+                    BLOCK_TILE_SKEW_SIZE_Y>(
+                    a_frags, b_frags, acc_frags,
+                    A_thread_block_tile_transposed[pipeline_index + 1],
+                    B_thread_block_tile[pipeline_index + 1], warp_row_idx,
+                    warp_col_idx);
+            }
+            __syncthreads();
+
+            // Pipeline 0 warps load buffer 0.
+            if (thread_block_tile_idx + 2U < num_thread_block_tiles)
+            {
+                load_data_from_global_memory_to_shared_memory_transposed_vectorized<
+                    T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+                    NUM_THREADS_PER_PIPELINE, BLOCK_TILE_SKEW_SIZE_X,
+                    BLOCK_TILE_SKEW_SIZE_Y>(
+                    A, lda, B, ldb,
+                    A_thread_block_tile_transposed[pipeline_index],
+                    B_thread_block_tile[pipeline_index],
+                    thread_block_tile_idx + 2,
+                    thread_linear_idx -
+                        pipeline_index * NUM_THREADS_PER_PIPELINE,
+                    m, n, k);
+            }
+            __syncthreads();
+        }
+        else
+        {
+            // Pipeline 1 warps load buffer 1.
+            if (thread_block_tile_idx + 1U < num_thread_block_tiles)
+            {
+                load_data_from_global_memory_to_shared_memory_transposed_vectorized<
+                    T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+                    NUM_THREADS_PER_PIPELINE, BLOCK_TILE_SKEW_SIZE_X,
+                    BLOCK_TILE_SKEW_SIZE_Y>(
+                    A, lda, B, ldb,
+                    A_thread_block_tile_transposed[pipeline_index],
+                    B_thread_block_tile[pipeline_index],
+                    thread_block_tile_idx + 1,
+                    thread_linear_idx -
+                        pipeline_index * NUM_THREADS_PER_PIPELINE,
+                    m, n, k);
+            }
+            __syncthreads();
+
+            // Pipeline 1 warps process buffer 0.
+            process_data_from_shared_memory_using_wmma<
+                T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+                WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, WMMA_TILE_SIZE_X,
+                WMMA_TILE_SIZE_Y, WMMA_TILE_SIZE_K, NUM_WMMA_TILES_X,
+                NUM_WMMA_TILES_Y, NUM_WMMA_TILES_K, BLOCK_TILE_SKEW_SIZE_X,
+                BLOCK_TILE_SKEW_SIZE_Y>(
+                a_frags, b_frags, acc_frags,
+                A_thread_block_tile_transposed[pipeline_index - 1],
+                B_thread_block_tile[pipeline_index - 1], warp_row_idx,
+                warp_col_idx);
+            __syncthreads();
+
+            // Pipeline 1 warps process buffer 1.
+            if (thread_block_tile_idx + 1U < num_thread_block_tiles)
+            {
+                process_data_from_shared_memory_using_wmma<
+                    T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
+                    WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, WMMA_TILE_SIZE_X,
+                    WMMA_TILE_SIZE_Y, WMMA_TILE_SIZE_K, NUM_WMMA_TILES_X,
+                    NUM_WMMA_TILES_Y, NUM_WMMA_TILES_K, BLOCK_TILE_SKEW_SIZE_X,
+                    BLOCK_TILE_SKEW_SIZE_Y>(
+                    a_frags, b_frags, acc_frags,
+                    A_thread_block_tile_transposed[pipeline_index],
+                    B_thread_block_tile[pipeline_index], warp_row_idx,
+                    warp_col_idx);
+            }
+            __syncthreads();
+        }
     }
 
 // Write the results to DRAM.
