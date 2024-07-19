@@ -296,7 +296,6 @@ gemm_v06_vectorized_double_buffered(size_t m, size_t n, size_t k, T alpha,
     if (pipeline_index == 0U)
     {
         // Pipeline 0 warps load buffer 0.
-        // Load data from global memory to shared memory.
         load_data_from_global_memory_to_shared_memory_transposed_vectorized<
             T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
             NUM_THREADS_PER_PIPELINE>(
@@ -313,6 +312,7 @@ gemm_v06_vectorized_double_buffered(size_t m, size_t n, size_t k, T alpha,
     {
         if (pipeline_index == 0U)
         {
+            // Pipeline 0 warps process buffer 0.
             process_data_from_shared_memory_using_register_file_vectorized<
                 T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
                 WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, THREAD_TILE_SIZE_X,
@@ -325,6 +325,7 @@ gemm_v06_vectorized_double_buffered(size_t m, size_t n, size_t k, T alpha,
                 thread_linear_row_idx_in_warp, thread_linear_col_idx_in_warp);
             __syncthreads();
 
+            // Pipeline 0 warps process buffer 1.
             if (thread_block_tile_idx + 1U < num_thread_block_tiles)
             {
                 process_data_from_shared_memory_using_register_file_vectorized<
@@ -341,7 +342,7 @@ gemm_v06_vectorized_double_buffered(size_t m, size_t n, size_t k, T alpha,
             }
             __syncthreads();
 
-            // Load data from global memory to shared memory.
+            // Pipeline 0 warps load buffer 0.
             if (thread_block_tile_idx + 2U < num_thread_block_tiles)
             {
                 load_data_from_global_memory_to_shared_memory_transposed_vectorized<
@@ -359,7 +360,7 @@ gemm_v06_vectorized_double_buffered(size_t m, size_t n, size_t k, T alpha,
         }
         else
         {
-            // Load data from global memory to shared memory.
+            // Pipeline 1 warps load buffer 1.
             if (thread_block_tile_idx + 1U < num_thread_block_tiles)
             {
                 load_data_from_global_memory_to_shared_memory_transposed_vectorized<
@@ -375,6 +376,7 @@ gemm_v06_vectorized_double_buffered(size_t m, size_t n, size_t k, T alpha,
             }
             __syncthreads();
 
+            // Pipeline 1 warps process buffer 0.
             process_data_from_shared_memory_using_register_file_vectorized<
                 T, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K,
                 WARP_TILE_SIZE_X, WARP_TILE_SIZE_Y, THREAD_TILE_SIZE_X,
@@ -388,6 +390,7 @@ gemm_v06_vectorized_double_buffered(size_t m, size_t n, size_t k, T alpha,
                 thread_linear_col_idx_in_warp);
             __syncthreads();
 
+            // Pipeline 1 warps process buffer 1.
             if (thread_block_tile_idx + 1U < num_thread_block_tiles)
             {
                 process_data_from_shared_memory_using_register_file_vectorized<
