@@ -17,6 +17,11 @@ int main()
     __half const fp16_tensor_core_abs_tol{__float2half(5.0e-2f)};
     double const fp16_tensor_core_rel_tol{1.0e-2f};
 
+    // This shape does not work ?!
+    // constexpr size_t m{4093U};
+    // constexpr size_t k{4093U};
+    // constexpr size_t n{4093U};
+
     constexpr size_t m{4096U};
     constexpr size_t k{4096U};
     constexpr size_t n{4096U};
@@ -46,20 +51,20 @@ int main()
                            size_t, __half const*, size_t, __half const*,
                            __half*, size_t, cudaStream_t)>>> const
         gemm_fp16_kernel_launch_functions{
-            {"Custom GEMM Kernel V00", launch_gemm_kernel_v00<__half>},
-            {"Custom GEMM Kernel V01", launch_gemm_kernel_v01<__half>},
-            {"Custom GEMM Kernel V02", launch_gemm_kernel_v02<__half>},
-            {"Custom GEMM Kernel V02 Vectorized",
-             launch_gemm_kernel_v02_vectorized<__half>},
-            {"Custom GEMM Kernel V03", launch_gemm_kernel_v03<__half>},
-            {"Custom GEMM Kernel V03 Vectorized",
-             launch_gemm_kernel_v03_vectorized<__half>},
-            {"Custom GEMM Kernel V04", launch_gemm_kernel_v04<__half>},
-            {"Custom GEMM Kernel V04 Vectorized",
-             launch_gemm_kernel_v04_vectorized<__half>},
-            {"Custom GEMM Kernel V05", launch_gemm_kernel_v05<__half>},
-            {"Custom GEMM Kernel V05 Vectorized",
-             launch_gemm_kernel_v05_vectorized<__half>},
+            // {"Custom GEMM Kernel V00", launch_gemm_kernel_v00<__half>},
+            // {"Custom GEMM Kernel V01", launch_gemm_kernel_v01<__half>},
+            // {"Custom GEMM Kernel V02", launch_gemm_kernel_v02<__half>},
+            // {"Custom GEMM Kernel V02 Vectorized",
+            //  launch_gemm_kernel_v02_vectorized<__half>},
+            // {"Custom GEMM Kernel V03", launch_gemm_kernel_v03<__half>},
+            // {"Custom GEMM Kernel V03 Vectorized",
+            //  launch_gemm_kernel_v03_vectorized<__half>},
+            // {"Custom GEMM Kernel V04", launch_gemm_kernel_v04<__half>},
+            // {"Custom GEMM Kernel V04 Vectorized",
+            //  launch_gemm_kernel_v04_vectorized<__half>},
+            // {"Custom GEMM Kernel V05", launch_gemm_kernel_v05<__half>},
+            // {"Custom GEMM Kernel V05 Vectorized",
+            //  launch_gemm_kernel_v05_vectorized<__half>},
             {"Custom GEMM Kernel V06", launch_gemm_kernel_v06<__half>},
             {"Custom GEMM Kernel V06 Vectorized",
              launch_gemm_kernel_v06_vectorized<__half>},

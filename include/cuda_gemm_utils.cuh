@@ -394,22 +394,19 @@ load_data_from_global_memory_to_shared_memory_transposed_vectorized(
         // But they guarantee the correctness of the kernel for all
         // different GEMM configurations.
         int4 A_row_vector_vals{0, 0, 0, 0};
-        if (A_row_idx < m && A_col_idx < k)
+        if (A_row_idx < m && A_col_idx + NUM_VECTOR_UNITS < k)
         {
             A_row_vector_vals =
                 *reinterpret_cast<int4 const*>(&A[A_row_idx * lda + A_col_idx]);
         }
-        if (A_col_idx + NUM_VECTOR_UNITS > k)
+        if (A_row_idx < m && A_col_idx < k && A_col_idx + NUM_VECTOR_UNITS >= k)
         {
-            // Number of invalid elements in the last vector.
-            size_t const num_invalid_elements{A_col_idx + NUM_VECTOR_UNITS - k};
-            // Mask out the invalid elements.
+            size_t const num_valid_elements{k - A_col_idx};
             T* const A_row_vector_vals_ptr{
                 reinterpret_cast<T*>(&A_row_vector_vals)};
-            for (size_t i{0U}; i < num_invalid_elements; ++i)
+            for (size_t i{0U}; i < num_valid_elements; ++i)
             {
-                A_row_vector_vals_ptr[NUM_VECTOR_UNITS - 1U - i] =
-                    static_cast<T>(0);
+                A_row_vector_vals_ptr[i] = A[A_row_idx * lda + A_col_idx + i];
             }
         }
         // If this is true, the following if can be removed.
@@ -450,22 +447,19 @@ load_data_from_global_memory_to_shared_memory_transposed_vectorized(
         // But they guarantee the correctness of the kernel for all
         // different GEMM configurations.
         int4 B_row_vector_vals{0, 0, 0, 0};
-        if (B_row_idx < k && B_col_idx < n)
+        if (B_row_idx < k && B_col_idx + NUM_VECTOR_UNITS < n)
         {
             B_row_vector_vals =
                 *reinterpret_cast<int4 const*>(&B[B_row_idx * ldb + B_col_idx]);
         }
-        if (B_col_idx + NUM_VECTOR_UNITS > n)
+        if (B_row_idx < k && B_col_idx < n && B_col_idx + NUM_VECTOR_UNITS >= n)
         {
-            // Number of invalid elements in the last vector.
-            size_t const num_invalid_elements{B_col_idx + NUM_VECTOR_UNITS - n};
-            // Mask out the invalid elements.
+            size_t const num_valid_elements{n - B_col_idx};
             T* const B_row_vector_vals_ptr{
                 reinterpret_cast<T*>(&B_row_vector_vals)};
-            for (size_t i{0U}; i < num_invalid_elements; ++i)
+            for (size_t i{0U}; i < num_valid_elements; ++i)
             {
-                B_row_vector_vals_ptr[NUM_VECTOR_UNITS - 1U - i] =
-                    static_cast<T>(0);
+                B_row_vector_vals_ptr[i] = B[B_row_idx * ldb + B_col_idx + i];
             }
         }
         // If this is true, the following if can be removed.
