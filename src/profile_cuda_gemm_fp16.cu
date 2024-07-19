@@ -86,7 +86,10 @@ int main()
         gemm_fp16_tensor_core_kernel_launch_functions{
             {"Custom GEMM Kernel V07", launch_gemm_kernel_v07<__half>},
             {"Custom GEMM Kernel V07 Vectorized",
-             launch_gemm_kernel_v07_vectorized<__half>}};
+             launch_gemm_kernel_v07_vectorized<__half>},
+            {"Custom GEMM Kernel V07 Vectorized Double Buffered",
+             launch_gemm_kernel_v07_vectorized_double_buffered<__half>},
+        };
 
     for (auto const& gemm_fp16_tensor_core_kernel_launch_function :
          gemm_fp16_tensor_core_kernel_launch_functions)
